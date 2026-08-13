@@ -241,9 +241,17 @@ KMS-key Secrets) between instances. Consequences:
   before, the full flow. **[validated — design constrained]** CEL admission policies are
   explicitly disabled in kommodity (`pkg/server/admission.go` disables the
   ValidatingAdmissionPolicy plugins), so the guardrail is a **validating admission webhook**
-  served by the existing in-process webhook server; the marker is a `kommodity.io/self-hosted`
-  annotation (no pivot flow exists yet to write a pivot-time marker, so the annotation is set by
-  the operator/chart, later automated by the pivot). Shipped with this PRD revision.
+  served by the existing in-process webhook server. The contract (binding for the future
+  reverse-pivot flow): the marker is the **`kommodity.io/self-hosted` annotation** on the
+  Cluster (presence-based — any value counts, so typos fail closed; stamped by the chart via
+  `kommodity.selfHosted: true`, later automated by the pivot), OR'd with the
+  **`KOMMODITY_SELF_HOSTED_CLUSTER=<namespace>/<name>`** environment backstop, which cannot be
+  stripped through the Kubernetes API. Deletion — and removal of the marker annotation itself —
+  is allowed only when the **`kommodity.io/allow-self-hosted-delete: "true"`** override
+  annotation is present; setting it is an explicit, auditable act, surfaced as an admission
+  warning. The webhook fails closed (`failurePolicy: Fail`); since webhook server and API
+  server are one binary, the only "webhook down" window is startup. Shipped with this PRD
+  revision.
 - **FR18 — Handover to ephemeral instance.** Full-state reverse handover from the self-managed
   instance to a local/CI kommodity in `--teardown-mode` backed by ephemeral PostgreSQL.
 - **FR19 — Capability verification (hard gate).** Before the ephemeral instance takes over: all
