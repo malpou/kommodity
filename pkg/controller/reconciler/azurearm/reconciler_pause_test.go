@@ -5,51 +5,17 @@ import (
 	"context"
 	"testing"
 
-	resourcesv1 "github.com/Azure/azure-service-operator/v2/api/resources/v1api20200601"
-	"github.com/Azure/azure-service-operator/v2/pkg/genruntime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 )
 
 const testClusterName = "c1"
-
-// newPauseTestScheme extends the ASO test scheme with the CAPI Cluster types so
-// pause resolution via the cluster.x-k8s.io/cluster-name label can be exercised.
-func newPauseTestScheme(t *testing.T) *runtime.Scheme {
-	t.Helper()
-
-	scheme := newTestScheme(t)
-
-	err := clusterv1.AddToScheme(scheme)
-	require.NoError(t, err, "adding cluster-api scheme")
-
-	return scheme
-}
-
-func newPauseTestReconciler(t *testing.T, objs ...client.Object) *Reconciler {
-	t.Helper()
-
-	kubeClient := fake.NewClientBuilder().
-		WithScheme(newPauseTestScheme(t)).
-		WithObjects(objs...).
-		WithStatusSubresource(&resourcesv1.ResourceGroup{}).
-		Build()
-
-	return &Reconciler{
-		Client:         kubeClient,
-		controllerName: "azurearm-resourcegroup",
-		newObj:         func() genruntime.ARMMetaObject { return &resourcesv1.ResourceGroup{} },
-		armIDFor:       resourceGroupARMID,
-	}
-}
 
 func newCAPICluster(paused bool) *clusterv1.Cluster {
 	return &clusterv1.Cluster{
@@ -63,16 +29,8 @@ func newCAPICluster(paused bool) *clusterv1.Cluster {
 	}
 }
 
-func newLabeledResourceGroup(labels map[string]string, annos map[string]string) *resourcesv1.ResourceGroup {
-	resourceGroup := newResourceGroup("my-rg")
-	resourceGroup.ObjectMeta = metav1.ObjectMeta{
-		Namespace:   testNamespace,
-		Name:        "my-rg",
-		Labels:      labels,
-		Annotations: annos,
-	}
-
-	return resourceGroup
+func clusterNameLabels() map[string]string {
+	return map[string]string{clusterv1.ClusterNameLabel: testClusterName}
 }
 
 func reconcileRequest() ctrl.Request {
@@ -84,10 +42,10 @@ func reconcileRequest() ctrl.Request {
 func TestReconcileSkipsPausedAnnotatedResource(t *testing.T) {
 	t.Parallel()
 
-	resourceGroup := newLabeledResourceGroup(nil, map[string]string{
+	resourceGroup := newManagedResourceGroup(nil, nil, map[string]string{
 		clusterv1.PausedAnnotation: "true",
 	})
-	reconciler := newPauseTestReconciler(t, resourceGroup)
+	reconciler := newDeleteTestReconciler(t, resourceGroup, 0)
 
 	result, err := reconciler.Reconcile(context.Background(), reconcileRequest())
 
@@ -98,10 +56,8 @@ func TestReconcileSkipsPausedAnnotatedResource(t *testing.T) {
 func TestReconcileSkipsResourceOfPausedCluster(t *testing.T) {
 	t.Parallel()
 
-	resourceGroup := newLabeledResourceGroup(map[string]string{
-		clusterv1.ClusterNameLabel: testClusterName,
-	}, nil)
-	reconciler := newPauseTestReconciler(t, resourceGroup, newCAPICluster(true))
+	resourceGroup := newManagedResourceGroup(nil, clusterNameLabels(), nil)
+	reconciler := newDeleteTestReconciler(t, resourceGroup, 0, newCAPICluster(true))
 
 	result, err := reconciler.Reconcile(context.Background(), reconcileRequest())
 
@@ -112,38 +68,32 @@ func TestReconcileSkipsResourceOfPausedCluster(t *testing.T) {
 func TestReconcilePausedSkipsDeleteAndRetainsFinalizer(t *testing.T) {
 	t.Parallel()
 
-	resourceGroup := newLabeledResourceGroup(map[string]string{
-		clusterv1.ClusterNameLabel: testClusterName,
-	}, nil)
-	resourceGroup.Finalizers = []string{finalizerName}
+	resourceGroup := newManagedResourceGroup([]string{finalizerName}, clusterNameLabels(), nil)
 	now := metav1.Now()
 	resourceGroup.DeletionTimestamp = &now
 
-	reconciler := newPauseTestReconciler(t, resourceGroup, newCAPICluster(true))
+	reconciler := newDeleteTestReconciler(t, resourceGroup, 0, newCAPICluster(true))
 
 	result, err := reconciler.Reconcile(context.Background(), reconcileRequest())
 
 	require.NoError(t, err)
 	assert.Equal(t, ctrl.Result{}, result)
 
-	fetched := &resourcesv1.ResourceGroup{}
-	err = reconciler.Get(context.Background(),
-		types.NamespacedName{Namespace: testNamespace, Name: "my-rg"}, fetched)
-	require.NoError(t, err)
+	fetched := getResourceGroup(t, reconciler)
 	assert.True(t, controllerutil.ContainsFinalizer(fetched, finalizerName),
 		"finalizer must be retained while paused so no ARM DELETE is issued")
 }
 
-func TestIsPaused(t *testing.T) {
-	t.Parallel()
+type isPausedCase struct {
+	name    string
+	labels  map[string]string
+	annos   map[string]string
+	cluster *clusterv1.Cluster
+	want    bool
+}
 
-	testCases := []struct {
-		name    string
-		labels  map[string]string
-		annos   map[string]string
-		cluster *clusterv1.Cluster
-		want    bool
-	}{
+func isPausedCases() []isPausedCase {
+	return []isPausedCase{
 		{
 			name:  "paused annotation on the resource itself",
 			annos: map[string]string{clusterv1.PausedAnnotation: "true"},
@@ -151,18 +101,24 @@ func TestIsPaused(t *testing.T) {
 		},
 		{
 			name:    "owning cluster paused",
-			labels:  map[string]string{clusterv1.ClusterNameLabel: testClusterName},
+			labels:  clusterNameLabels(),
 			cluster: newCAPICluster(true),
 			want:    true,
 		},
 		{
 			name:    "owning cluster not paused",
-			labels:  map[string]string{clusterv1.ClusterNameLabel: testClusterName},
+			labels:  clusterNameLabels(),
 			cluster: newCAPICluster(false),
 			want:    false,
 		},
 		{
-			name:   "owning cluster missing",
+			name:   "owning cluster missing falls back to own annotation",
+			labels: map[string]string{clusterv1.ClusterNameLabel: "gone"},
+			annos:  map[string]string{clusterv1.PausedAnnotation: "true"},
+			want:   true,
+		},
+		{
+			name:   "owning cluster missing and no annotation",
 			labels: map[string]string{clusterv1.ClusterNameLabel: "gone"},
 			want:   false,
 		},
@@ -171,19 +127,23 @@ func TestIsPaused(t *testing.T) {
 			want: false,
 		},
 	}
+}
 
-	for _, testCase := range testCases {
+func TestIsPaused(t *testing.T) {
+	t.Parallel()
+
+	for _, testCase := range isPausedCases() {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			resourceGroup := newLabeledResourceGroup(testCase.labels, testCase.annos)
+			resourceGroup := newManagedResourceGroup(nil, testCase.labels, testCase.annos)
 
-			objs := []client.Object{resourceGroup}
+			var extraObjs []client.Object
 			if testCase.cluster != nil {
-				objs = append(objs, testCase.cluster)
+				extraObjs = append(extraObjs, testCase.cluster)
 			}
 
-			reconciler := newPauseTestReconciler(t, objs...)
+			reconciler := newDeleteTestReconciler(t, resourceGroup, 0, extraObjs...)
 
 			paused, err := reconciler.isPaused(context.Background(), resourceGroup)
 

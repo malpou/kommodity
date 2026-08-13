@@ -10,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -63,13 +64,48 @@ func (v *SelfHostedClusterValidator) ValidateCreate(
 	return nil, nil
 }
 
-// ValidateUpdate implements admission.CustomValidator; updates are always allowed.
+// ValidateUpdate blocks removal of the self-hosted marker annotation unless the
+// override annotation is present, so the deletion guardrail cannot be silently
+// stripped in one update before deleting. Everything else is allowed.
 func (v *SelfHostedClusterValidator) ValidateUpdate(
-	_ context.Context,
-	_ runtime.Object,
-	_ runtime.Object,
+	ctx context.Context,
+	oldObj runtime.Object,
+	newObj runtime.Object,
 ) (admission.Warnings, error) {
-	return nil, nil
+	logger := logging.FromContext(ctx)
+
+	oldCluster, err := toCluster(oldObj)
+	if err != nil {
+		return nil, err
+	}
+
+	newCluster, err := toCluster(newObj)
+	if err != nil {
+		return nil, err
+	}
+
+	markerKept := oldCluster.GetAnnotations()[config.SelfHostedAnnotation] != annotationEnabledValue ||
+		newCluster.GetAnnotations()[config.SelfHostedAnnotation] == annotationEnabledValue
+	if markerKept {
+		return nil, nil
+	}
+
+	key := client.ObjectKeyFromObject(newCluster).String()
+
+	if newCluster.GetAnnotations()[config.AllowSelfHostedDeleteAnnotation] == annotationEnabledValue {
+		logger.Warn("Allowing removal of self-hosted marker due to override annotation",
+			zap.String("cluster", key),
+			zap.String("annotation", config.AllowSelfHostedDeleteAnnotation))
+
+		warning := fmt.Sprintf("removing the %s marker from cluster %s: the %s override annotation is set",
+			config.SelfHostedAnnotation, key, config.AllowSelfHostedDeleteAnnotation)
+
+		return admission.Warnings{warning}, nil
+	}
+
+	logger.Warn("Blocking removal of self-hosted marker", zap.String("cluster", key))
+
+	return nil, fmt.Errorf("%w: cluster %s", ErrSelfHostedMarkerRemovalBlocked, key)
 }
 
 // ValidateDelete blocks the request when the Cluster is marked as self-hosted,
@@ -82,44 +118,49 @@ func (v *SelfHostedClusterValidator) ValidateDelete(
 ) (admission.Warnings, error) {
 	logger := logging.FromContext(ctx)
 
+	cluster, err := toCluster(obj)
+	if err != nil {
+		return nil, err
+	}
+
+	key := client.ObjectKeyFromObject(cluster).String()
+
+	if !v.isSelfHosted(cluster, key) {
+		return nil, nil
+	}
+
+	if cluster.GetAnnotations()[config.AllowSelfHostedDeleteAnnotation] == annotationEnabledValue {
+		logger.Warn("Allowing deletion of self-hosted cluster due to override annotation",
+			zap.String("cluster", key),
+			zap.String("annotation", config.AllowSelfHostedDeleteAnnotation))
+
+		warning := fmt.Sprintf("deleting self-hosted cluster %s: the %s override annotation is set",
+			key, config.AllowSelfHostedDeleteAnnotation)
+
+		return admission.Warnings{warning}, nil
+	}
+
+	logger.Warn("Blocking deletion of self-hosted cluster", zap.String("cluster", key))
+
+	return nil, fmt.Errorf("%w: cluster %s", ErrSelfHostedClusterDeletionBlocked, key)
+}
+
+// toCluster asserts that an admission object is a CAPI Cluster.
+func toCluster(obj runtime.Object) (*clusterv1.Cluster, error) {
 	cluster, success := obj.(*clusterv1.Cluster)
 	if !success {
 		return nil, fmt.Errorf("%w: expected Cluster, got %T", ErrUnexpectedObjectType, obj)
 	}
 
-	if !v.isSelfHosted(cluster) {
-		return nil, nil
-	}
-
-	annotations := cluster.GetAnnotations()
-	if annotations[config.AllowSelfHostedDeleteAnnotation] == annotationEnabledValue {
-		logger.Warn("Allowing deletion of self-hosted cluster due to override annotation",
-			zap.String("cluster", cluster.GetNamespace()+"/"+cluster.GetName()),
-			zap.String("annotation", config.AllowSelfHostedDeleteAnnotation))
-
-		warning := fmt.Sprintf("deleting self-hosted cluster %s/%s: the %s override annotation is set",
-			cluster.GetNamespace(), cluster.GetName(), config.AllowSelfHostedDeleteAnnotation)
-
-		return admission.Warnings{warning}, nil
-	}
-
-	logger.Warn("Blocking deletion of self-hosted cluster",
-		zap.String("cluster", cluster.GetNamespace()+"/"+cluster.GetName()))
-
-	return nil, fmt.Errorf("%w: cluster %s/%s",
-		ErrSelfHostedClusterDeletionBlocked, cluster.GetNamespace(), cluster.GetName())
+	return cluster, nil
 }
 
 // isSelfHosted reports whether the Cluster carries the self-hosted annotation or
 // matches the environment-configured "<namespace>/<name>" marker.
-func (v *SelfHostedClusterValidator) isSelfHosted(cluster *clusterv1.Cluster) bool {
+func (v *SelfHostedClusterValidator) isSelfHosted(cluster *clusterv1.Cluster, key string) bool {
 	if cluster.GetAnnotations()[config.SelfHostedAnnotation] == annotationEnabledValue {
 		return true
 	}
 
-	if v.selfHostedCluster == "" {
-		return false
-	}
-
-	return v.selfHostedCluster == cluster.GetNamespace()+"/"+cluster.GetName()
+	return v.selfHostedCluster != "" && v.selfHostedCluster == key
 }

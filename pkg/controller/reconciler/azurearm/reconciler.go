@@ -23,9 +23,12 @@ import (
 	capiannotations "sigs.k8s.io/cluster-api/util/annotations"
 	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/apiutil"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 )
 
 const (
@@ -70,22 +73,34 @@ type Reconciler struct {
 }
 
 // SetupWithManager registers this reconciler for its kind with the manager.
+// Besides the primary watch it also watches CAPI Clusters transitioning to
+// unpaused, re-enqueueing the cluster's ASO objects — without it, resources
+// skipped while paused would only resume on the next cache resync.
 func (r *Reconciler) SetupWithManager(
 	ctx context.Context,
 	mgr ctrl.Manager,
 	opt controller.Options,
 ) error {
+	logger := zapr.NewLogger(logging.FromContext(ctx))
+
 	logging.FromContext(ctx).Info("Setting up embedded Azure ARM controller",
 		zap.String("controller", r.controllerName))
 
-	err := ctrl.NewControllerManagedBy(mgr).
+	clusterToObjects, err := r.clusterToObjectsMapper(mgr)
+	if err != nil {
+		return fmt.Errorf("building cluster-to-%s mapper: %w", r.controllerName, err)
+	}
+
+	err = ctrl.NewControllerManagedBy(mgr).
 		Named(r.controllerName).
 		For(r.newObj()).
 		WithOptions(opt).
-		WithEventFilter(predicates.ResourceNotPaused(
-			mgr.GetScheme(),
-			zapr.NewLogger(logging.FromContext(ctx)),
-		)).
+		WithEventFilter(predicates.ResourceNotPaused(mgr.GetScheme(), logger)).
+		Watches(
+			&clusterv1.Cluster{},
+			handler.EnqueueRequestsFromMapFunc(clusterToObjects),
+			builder.WithPredicates(predicates.ClusterUnpaused(mgr.GetScheme(), logger)),
+		).
 		Complete(r)
 	if err != nil {
 		return fmt.Errorf("setting up %s controller: %w", r.controllerName, err)
@@ -163,26 +178,48 @@ func requeueOnConflict(logger *zap.Logger, result ctrl.Result, err error) (ctrl.
 	return result, err
 }
 
+// clusterToObjectsMapper builds a handler that maps a CAPI Cluster to all
+// objects of this reconciler's kind labeled with the cluster's name.
+func (r *Reconciler) clusterToObjectsMapper(mgr ctrl.Manager) (handler.MapFunc, error) {
+	gvk, err := apiutil.GVKForObject(r.newObj(), mgr.GetScheme())
+	if err != nil {
+		return nil, fmt.Errorf("resolving GVK: %w", err)
+	}
+
+	listObj, err := mgr.GetScheme().New(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
+	if err != nil {
+		return nil, fmt.Errorf("constructing list type: %w", err)
+	}
+
+	clientList, success := listObj.(client.ObjectList)
+	if !success {
+		return nil, fmt.Errorf("%w: %T is not a client.ObjectList", ErrUnsupportedResourceType, listObj)
+	}
+
+	mapper, err := capiutil.ClusterToTypedObjectsMapper(mgr.GetClient(), clientList, mgr.GetScheme())
+	if err != nil {
+		return nil, fmt.Errorf("building cluster mapper: %w", err)
+	}
+
+	return mapper, nil
+}
+
 // isPaused reports whether the ASO object or its owning CAPI Cluster (resolved
 // via the cluster.x-k8s.io/cluster-name label CAPZ stamps on every ASO resource
 // it creates) is paused. The pause check runs before the deletion branch so a
 // paused handover also stops ARM DELETEs, matching upstream CAPI providers.
 func (r *Reconciler) isPaused(ctx context.Context, obj genruntime.ARMMetaObject) (bool, error) {
-	if capiannotations.HasPaused(obj) {
-		return true, nil
-	}
-
 	clusterName := obj.GetLabels()[clusterv1.ClusterNameLabel]
 	if clusterName == "" {
 		// Not CAPZ-owned; there is no Cluster to consult.
-		return false, nil
+		return capiannotations.HasPaused(obj), nil
 	}
 
 	cluster, err := capiutil.GetClusterByName(ctx, r.Client, obj.GetNamespace(), clusterName)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			// Orphaned object; preserve the pre-existing reconcile behaviour.
-			return false, nil
+			// Orphaned object; only its own annotation can pause it.
+			return capiannotations.HasPaused(obj), nil
 		}
 
 		return false, fmt.Errorf("getting owning cluster %s/%s: %w", obj.GetNamespace(), clusterName, err)

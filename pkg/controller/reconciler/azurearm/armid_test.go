@@ -13,6 +13,7 @@ import (
 	"github.com/Azure/azure-service-operator/v2/pkg/genruntime"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -56,6 +57,11 @@ func newTestScheme(t *testing.T) *runtime.Scheme {
 	err = networkv20240301.AddToScheme(scheme)
 	if err != nil {
 		t.Fatalf("adding network v1api20240301 scheme: %v", err)
+	}
+
+	err = clusterv1.AddToScheme(scheme)
+	if err != nil {
+		t.Fatalf("adding cluster-api scheme: %v", err)
 	}
 
 	return scheme

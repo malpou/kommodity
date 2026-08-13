@@ -34,15 +34,13 @@ const conversionWebhookPath = "/convert"
 //go:embed crds/**/*.yaml
 var crds embed.FS
 
-//go:embed webhooks/*.yaml
-var webhooks embed.FS
-
-// kommodityWebhooks holds Kommodity-owned webhook manifests. They live outside
-// webhooks/ because scripts/fetch-providers.sh wipes that directory on every
-// `make generate` run.
+// webhooks holds both the fetched provider webhook manifests (webhooks/) and
+// the hand-authored Kommodity-owned ones (kommodity/). The latter live in
+// their own directory because scripts/fetch-providers.sh wipes webhooks/ on
+// every `make generate` run.
 //
-//go:embed kommodity/*.yaml
-var kommodityWebhooks embed.FS
+//go:embed webhooks/*.yaml kommodity/*.yaml
+var webhooks embed.FS
 
 // Cache caches provider CRDs to avoid redundant loading.
 type Cache struct {
@@ -450,18 +448,20 @@ func (pc *Cache) loadCRDInScheme(group string, obj *unstructured.Unstructured) {
 }
 
 func (pc *Cache) loadWebhookCache(ctx context.Context) error {
-	err := pc.loadWebhookDir(ctx, webhooks, "webhooks")
-	if err != nil {
-		return err
+	for _, dir := range []string{"webhooks", "kommodity"} {
+		err := pc.loadWebhookDir(ctx, dir)
+		if err != nil {
+			return err
+		}
 	}
 
-	return pc.loadWebhookDir(ctx, kommodityWebhooks, "kommodity")
+	return nil
 }
 
-func (pc *Cache) loadWebhookDir(ctx context.Context, fsys embed.FS, dir string) error {
+func (pc *Cache) loadWebhookDir(ctx context.Context, dir string) error {
 	logger := logging.FromContext(ctx)
 
-	entries, err := fsys.ReadDir(dir)
+	entries, err := webhooks.ReadDir(dir)
 	if err != nil {
 		return fmt.Errorf("failed to read webhook directory %s: %w", dir, err)
 	}
@@ -469,7 +469,7 @@ func (pc *Cache) loadWebhookDir(ctx context.Context, fsys embed.FS, dir string) 
 	for _, entry := range entries {
 		logger.Info("Loading webhook", zap.String("file", entry.Name()))
 
-		webhook, err := fsys.ReadFile(dir + "/" + entry.Name())
+		webhook, err := webhooks.ReadFile(dir + "/" + entry.Name())
 		if err != nil {
 			return fmt.Errorf("failed to read webhook file %s: %w", entry.Name(), err)
 		}

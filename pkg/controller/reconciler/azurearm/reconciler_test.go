@@ -44,14 +44,19 @@ func (f *fakeARM) put(_ context.Context, _ string, _ string, _ any) (*armRespons
 	return &armResponse{statusCode: http.StatusOK}, nil
 }
 
-// newManagedResourceGroup builds a ResourceGroup CR with metadata, our finalizer,
-// and optional extra finalizers/annotations for delete-path tests.
-func newManagedResourceGroup(finalizers []string, annos map[string]string) *resourcesv1.ResourceGroup {
+// newManagedResourceGroup builds a ResourceGroup CR with metadata and optional
+// finalizers/labels/annotations for delete-path and pause tests.
+func newManagedResourceGroup(
+	finalizers []string,
+	labels map[string]string,
+	annos map[string]string,
+) *resourcesv1.ResourceGroup {
 	resourceGroup := newResourceGroup("my-rg")
 	resourceGroup.ObjectMeta = metav1.ObjectMeta{
 		Namespace:   testNamespace,
 		Name:        "my-rg",
 		Finalizers:  finalizers,
+		Labels:      labels,
 		Annotations: annos,
 	}
 
@@ -62,13 +67,14 @@ func newDeleteTestReconciler(
 	t *testing.T,
 	obj client.Object,
 	gracePeriod time.Duration,
+	extraObjs ...client.Object,
 ) *Reconciler {
 	t.Helper()
 
 	scheme := newTestScheme(t)
 	kubeClient := fake.NewClientBuilder().
 		WithScheme(scheme).
-		WithObjects(obj).
+		WithObjects(append([]client.Object{obj}, extraObjs...)...).
 		WithStatusSubresource(&resourcesv1.ResourceGroup{}).
 		Build()
 
@@ -152,7 +158,7 @@ func TestEnsureFinalizers(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			resourceGroup := newManagedResourceGroup(test.finalizers, nil)
+			resourceGroup := newManagedResourceGroup(test.finalizers, nil, nil)
 			reconciler := newDeleteTestReconciler(t, resourceGroup, 0)
 
 			changed, err := reconciler.ensureFinalizers(
@@ -181,7 +187,7 @@ func TestEnsureFinalizers(t *testing.T) {
 func TestReconcileDeleteARMAlreadyGone(t *testing.T) {
 	t.Parallel()
 
-	resourceGroup := newManagedResourceGroup([]string{finalizerName}, nil)
+	resourceGroup := newManagedResourceGroup([]string{finalizerName}, nil, nil)
 	reconciler := newDeleteTestReconciler(t, resourceGroup, 15*time.Minute)
 	arm := &fakeARM{getResp: &armResponse{statusCode: http.StatusNotFound}}
 	creds := &azureCredentials{subscriptionID: testSubscriptionID, armClient: arm}
@@ -203,7 +209,7 @@ func TestReconcileDeleteARMAlreadyGone(t *testing.T) {
 func TestReconcileDeleteARMStillPresentIssuesDelete(t *testing.T) {
 	t.Parallel()
 
-	resourceGroup := newManagedResourceGroup([]string{finalizerName}, nil)
+	resourceGroup := newManagedResourceGroup([]string{finalizerName}, nil, nil)
 	reconciler := newDeleteTestReconciler(t, resourceGroup, 15*time.Minute)
 	arm := &fakeARM{
 		getResp: &armResponse{statusCode: http.StatusOK},
@@ -240,6 +246,7 @@ func TestReconcileDeleteARMGraceExpiredReleasesFinalizer(t *testing.T) {
 	startedLongAgo := time.Now().Add(-1 * time.Hour).UTC().Format(time.RFC3339)
 	resourceGroup := newManagedResourceGroup(
 		[]string{finalizerName},
+		nil,
 		map[string]string{deletionStartedAnnotation: startedLongAgo},
 	)
 	reconciler := newDeleteTestReconciler(t, resourceGroup, 15*time.Minute)
@@ -263,7 +270,7 @@ func TestReconcileDeleteARMGraceExpiredReleasesFinalizer(t *testing.T) {
 func TestReconcileDeleteARMRateLimitedGet(t *testing.T) {
 	t.Parallel()
 
-	resourceGroup := newManagedResourceGroup([]string{finalizerName}, nil)
+	resourceGroup := newManagedResourceGroup([]string{finalizerName}, nil, nil)
 	reconciler := newDeleteTestReconciler(t, resourceGroup, 15*time.Minute)
 	arm := &fakeARM{getResp: &armResponse{
 		statusCode: http.StatusTooManyRequests,

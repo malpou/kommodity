@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kommodity-io/kommodity/pkg/config"
 	"github.com/kommodity-io/kommodity/pkg/controller/webhook"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -14,6 +15,7 @@ import (
 const (
 	testClusterNamespace = "fleet"
 	testClusterName      = "management"
+	annotationEnabled    = "true"
 )
 
 func newCluster(annotations map[string]string) *clusterv1.Cluster {
@@ -30,7 +32,7 @@ func TestValidateDeleteBlocksAnnotatedSelfHostedCluster(t *testing.T) {
 	t.Parallel()
 
 	validator := webhook.NewSelfHostedClusterValidator("")
-	cluster := newCluster(map[string]string{"kommodity.io/self-hosted": "true"})
+	cluster := newCluster(map[string]string{config.SelfHostedAnnotation: annotationEnabled})
 
 	warnings, err := validator.ValidateDelete(context.Background(), cluster)
 
@@ -55,8 +57,8 @@ func TestValidateDeleteAllowsOverrideAnnotation(t *testing.T) {
 
 	validator := webhook.NewSelfHostedClusterValidator(testClusterNamespace + "/" + testClusterName)
 	cluster := newCluster(map[string]string{
-		"kommodity.io/self-hosted":              "true",
-		"kommodity.io/allow-self-hosted-delete": "true",
+		config.SelfHostedAnnotation:            annotationEnabled,
+		config.AllowSelfHostedDeleteAnnotation: annotationEnabled,
 	})
 
 	warnings, err := validator.ValidateDelete(context.Background(), cluster)
@@ -100,17 +102,52 @@ func TestValidateDeleteRejectsUnexpectedObjectType(t *testing.T) {
 	assert.Empty(t, warnings)
 }
 
-func TestValidateCreateAndUpdateAlwaysAllow(t *testing.T) {
+func TestValidateUpdateBlocksMarkerRemoval(t *testing.T) {
 	t.Parallel()
 
 	validator := webhook.NewSelfHostedClusterValidator("")
-	cluster := newCluster(map[string]string{"kommodity.io/self-hosted": "true"})
+	oldCluster := newCluster(map[string]string{config.SelfHostedAnnotation: annotationEnabled})
+	newCluster := newCluster(nil)
 
-	warnings, err := validator.ValidateCreate(context.Background(), cluster)
+	warnings, err := validator.ValidateUpdate(context.Background(), oldCluster, newCluster)
+
+	require.ErrorIs(t, err, webhook.ErrSelfHostedMarkerRemovalBlocked)
+	assert.Empty(t, warnings)
+}
+
+func TestValidateUpdateAllowsMarkerRemovalWithOverride(t *testing.T) {
+	t.Parallel()
+
+	validator := webhook.NewSelfHostedClusterValidator("")
+	oldCluster := newCluster(map[string]string{config.SelfHostedAnnotation: annotationEnabled})
+	newCluster := newCluster(map[string]string{
+		config.AllowSelfHostedDeleteAnnotation: annotationEnabled,
+	})
+
+	warnings, err := validator.ValidateUpdate(context.Background(), oldCluster, newCluster)
+
+	require.NoError(t, err)
+	assert.Len(t, warnings, 1, "override removal should surface a warning")
+}
+
+func TestValidateUpdateAllowsUnrelatedChanges(t *testing.T) {
+	t.Parallel()
+
+	validator := webhook.NewSelfHostedClusterValidator("")
+	marked := newCluster(map[string]string{config.SelfHostedAnnotation: annotationEnabled})
+	unmarked := newCluster(nil)
+
+	warnings, err := validator.ValidateUpdate(context.Background(), marked, marked)
 	require.NoError(t, err)
 	assert.Empty(t, warnings)
 
-	warnings, err = validator.ValidateUpdate(context.Background(), cluster, cluster)
+	// Adding the marker is always allowed.
+	warnings, err = validator.ValidateUpdate(context.Background(), unmarked, marked)
+	require.NoError(t, err)
+	assert.Empty(t, warnings)
+
+	// Updates to clusters that never carried the marker are always allowed.
+	warnings, err = validator.ValidateUpdate(context.Background(), unmarked, unmarked)
 	require.NoError(t, err)
 	assert.Empty(t, warnings)
 }
