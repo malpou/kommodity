@@ -134,6 +134,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if paused {
 		logger.Info("Resource or owning Cluster is paused; skipping reconciliation")
 
+		err = r.clearDeletionStamp(ctx, obj)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+
 		return ctrl.Result{}, nil
 	}
 
@@ -202,6 +207,34 @@ func (r *Reconciler) clusterToObjectsMapper(mgr ctrl.Manager) (handler.MapFunc, 
 	}
 
 	return mapper, nil
+}
+
+// clearDeletionStamp removes the deletion-started annotation from a paused,
+// deleting resource. The deletion grace period is wall-clock time; without the
+// reset, a pause lasting longer than the grace period would release the
+// finalizer on unpause without a single ARM DELETE having been issued,
+// silently orphaning the Azure resource.
+func (r *Reconciler) clearDeletionStamp(ctx context.Context, obj genruntime.ARMMetaObject) error {
+	if obj.GetDeletionTimestamp().IsZero() {
+		return nil
+	}
+
+	annos := obj.GetAnnotations()
+
+	_, stamped := annos[deletionStartedAnnotation]
+	if !stamped {
+		return nil
+	}
+
+	delete(annos, deletionStartedAnnotation)
+	obj.SetAnnotations(annos)
+
+	err := r.Update(ctx, obj)
+	if err != nil && !apierrors.IsConflict(err) {
+		return fmt.Errorf("clearing deletion-started annotation: %w", err)
+	}
+
+	return nil
 }
 
 // isPaused reports whether the ASO object or its owning CAPI Cluster (resolved

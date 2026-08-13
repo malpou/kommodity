@@ -84,6 +84,29 @@ func TestReconcilePausedSkipsDeleteAndRetainsFinalizer(t *testing.T) {
 		"finalizer must be retained while paused so no ARM DELETE is issued")
 }
 
+func TestReconcilePausedClearsDeletionStamp(t *testing.T) {
+	t.Parallel()
+
+	resourceGroup := newManagedResourceGroup(
+		[]string{finalizerName},
+		clusterNameLabels(),
+		map[string]string{deletionStartedAnnotation: "2020-01-01T00:00:00Z"},
+	)
+	now := metav1.Now()
+	resourceGroup.DeletionTimestamp = &now
+
+	reconciler := newDeleteTestReconciler(t, resourceGroup, 0, newCAPICluster(true))
+
+	_, err := reconciler.Reconcile(context.Background(), reconcileRequest())
+
+	require.NoError(t, err)
+
+	fetched := getResourceGroup(t, reconciler)
+	assert.Empty(t, fetched.GetAnnotations()[deletionStartedAnnotation],
+		"deletion grace stamp must reset while paused so unpausing cannot instantly expire it")
+	assert.True(t, controllerutil.ContainsFinalizer(fetched, finalizerName))
+}
+
 type isPausedCase struct {
 	name    string
 	labels  map[string]string

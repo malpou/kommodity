@@ -40,6 +40,19 @@ func TestValidateDeleteBlocksAnnotatedSelfHostedCluster(t *testing.T) {
 	assert.Empty(t, warnings)
 }
 
+func TestValidateDeleteBlocksMarkerWithNonTrueValue(t *testing.T) {
+	t.Parallel()
+
+	validator := webhook.NewSelfHostedClusterValidator("")
+	cluster := newCluster(map[string]string{config.SelfHostedAnnotation: "True"})
+
+	warnings, err := validator.ValidateDelete(context.Background(), cluster)
+
+	require.ErrorIs(t, err, webhook.ErrSelfHostedClusterDeletionBlocked,
+		"marker is presence-based; a value typo must fail closed")
+	assert.Empty(t, warnings)
+}
+
 func TestValidateDeleteBlocksEnvConfiguredSelfHostedCluster(t *testing.T) {
 	t.Parallel()
 

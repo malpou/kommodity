@@ -84,9 +84,10 @@ func (v *SelfHostedClusterValidator) ValidateUpdate(
 		return nil, err
 	}
 
-	markerKept := oldCluster.GetAnnotations()[config.SelfHostedAnnotation] != annotationEnabledValue ||
-		newCluster.GetAnnotations()[config.SelfHostedAnnotation] == annotationEnabledValue
-	if markerKept {
+	_, oldMarked := oldCluster.GetAnnotations()[config.SelfHostedAnnotation]
+	_, newMarked := newCluster.GetAnnotations()[config.SelfHostedAnnotation]
+
+	if !oldMarked || newMarked {
 		return nil, nil
 	}
 
@@ -156,9 +157,13 @@ func toCluster(obj runtime.Object) (*clusterv1.Cluster, error) {
 }
 
 // isSelfHosted reports whether the Cluster carries the self-hosted annotation or
-// matches the environment-configured "<namespace>/<name>" marker.
+// matches the environment-configured "<namespace>/<name>" marker. Like CAPI's
+// paused annotation, the marker is presence-based so the guardrail fails closed
+// on value typos ("True", "yes", ...); remove the annotation (with the override
+// set) rather than changing its value.
 func (v *SelfHostedClusterValidator) isSelfHosted(cluster *clusterv1.Cluster, key string) bool {
-	if cluster.GetAnnotations()[config.SelfHostedAnnotation] == annotationEnabledValue {
+	_, marked := cluster.GetAnnotations()[config.SelfHostedAnnotation]
+	if marked {
 		return true
 	}
 

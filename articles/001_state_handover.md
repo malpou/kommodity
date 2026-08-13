@@ -247,10 +247,11 @@ The new pieces:
 **The marker.** The PRD imagined a marker "written at pivot time" — but no pivot flow exists
 yet, so the marker has to work today. Two markers, OR'd:
 
-1. The **`kommodity.io/self-hosted: "true"` annotation** on the Cluster, stamped by the Helm
-   chart when `kommodity.selfHosted: true` is set. Annotations travel with the object through
-   a move, so when the pivot flow exists this *becomes* the pivot-time marker with no schema
-   change.
+1. The **`kommodity.io/self-hosted` annotation** on the Cluster, stamped (as `"true"`) by the
+   Helm chart when `kommodity.selfHosted: true` is set. The marker is presence-based — any
+   value counts, like CAPI's paused annotation — so a value typo fails closed rather than
+   silently disarming the guardrail. Annotations travel with the object through a move, so
+   when the pivot flow exists this *becomes* the pivot-time marker with no schema change.
 2. The **`KOMMODITY_SELF_HOSTED_CLUSTER=<namespace>/<name>` environment variable**
    (`pkg/config`). An operator-level backstop that cannot be stripped through the Kubernetes
    API, and that protects deployments created before the chart change.

@@ -10,7 +10,9 @@ const (
 	// SelfHostedAnnotation marks a CAPI Cluster as hosting the Kommodity management
 	// plane itself. Deletion of a Cluster carrying this annotation is blocked by the
 	// self-hosted cluster admission webhook until a reverse pivot (state handover)
-	// has moved the management plane off the cluster.
+	// has moved the management plane off the cluster. The marker is presence-based
+	// (any value counts, like CAPI's paused annotation) so the guardrail fails
+	// closed; unmark by removing the annotation with the override annotation set.
 	SelfHostedAnnotation = "kommodity.io/self-hosted"
 	// AllowSelfHostedDeleteAnnotation overrides the self-hosted deletion guardrail
 	// for a deliberate teardown. Setting it is an explicit, auditable act; the
