@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kommodity-io/kommodity/pkg/config"
 	"github.com/kommodity-io/kommodity/pkg/logging"
 	"sigs.k8s.io/cluster-api/controllers/clustercache"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -13,7 +14,8 @@ import (
 // SetupWebhooks sets up all webhooks with the provided manager.
 func SetupWebhooks(ctx context.Context,
 	manager *ctrl.Manager,
-	clusterCache clustercache.ClusterCache) error {
+	clusterCache clustercache.ClusterCache,
+	kommodityConfig *config.KommodityConfig) error {
 	logger := logging.FromContext(ctx)
 
 	// CAPI webhooks
@@ -42,6 +44,12 @@ func SetupWebhooks(ctx context.Context,
 	if err != nil {
 		return fmt.Errorf("failed to setup CAPZ webhooks: %w", err)
 	}
+
+	// Kommodity webhooks
+
+	logger.Info("Setting up self-hosted cluster deletion guardrail webhook")
+
+	setupSelfHostedClusterWebhook(*manager, kommodityConfig.SelfHostedCluster)
 
 	return nil
 }

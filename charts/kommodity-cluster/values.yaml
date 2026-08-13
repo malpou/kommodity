@@ -1,5 +1,11 @@
 # Default values for kommodity-cluster.
 kommodity:
+  # Marks this cluster as hosting the Kommodity management plane itself.
+  # When true, the CAPI Cluster is annotated with kommodity.io/self-hosted and
+  # Kommodity's admission webhook blocks its deletion until a reverse pivot
+  # (state handover) has moved the management plane off the cluster.
+  selfHosted: false
+
   provider:
     name: Docker
 

@@ -25,6 +25,9 @@ metadata:
   {{- if and .Values.kommodity.network.ipv4.enabled $nodesPrivate .Values.kommodity.network.ipv4.nodeCIDR }}
   {{- $_ := set $annotations "kommodity.io/node-cidr" .Values.kommodity.network.ipv4.nodeCIDR }}
   {{- end }}
+  {{- if .Values.kommodity.selfHosted }}
+  {{- $_ := set $annotations "kommodity.io/self-hosted" "true" }}
+  {{- end }}
   {{- if .Values.kommodity.provider.cloudControllerManager.enabled }}
   {{- if eq .Values.kommodity.provider.name "Azure" }}
   {{- /*

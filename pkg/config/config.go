@@ -46,6 +46,7 @@ const (
 	//nolint:gosec // G101: env var name, not a credential
 	envAzureDefaultCredentialSecret = "KOMMODITY_AZURE_DEFAULT_CREDENTIAL_SECRET"
 	envAzureARMDeletionGracePeriod  = "KOMMODITY_AZURE_ARM_DELETION_GRACE_PERIOD"
+	envSelfHostedCluster            = "KOMMODITY_SELF_HOSTED_CLUSTER"
 
 	defaultServerPort                         = 5000
 	defaultAPIServerPort                      = 8443
@@ -66,6 +67,7 @@ const (
 	defaultGarbageCollectorSyncPeriod         = 30 * time.Second
 	defaultGarbageCollectorInitialSyncTimeout = 60 * time.Second
 	defaultAzureDefaultCredentialSecret       = ""
+	defaultSelfHostedCluster                  = ""
 	// defaultAzureARMDeletionGracePeriod bounds how long the embedded ARM
 	// reconciler waits for Azure to actually delete a managed resource before it
 	// releases its finalizer. This prevents a single un-deletable resource from
@@ -95,6 +97,10 @@ type KommodityConfig struct {
 	DevelopmentMode         bool
 	InfrastructureProviders []Provider
 	AzureConfig             *AzureConfig
+	// SelfHostedCluster names the CAPI Cluster ("<namespace>/<name>") hosting this
+	// Kommodity instance. It backs the self-hosted deletion guardrail alongside the
+	// SelfHostedAnnotation; empty disables the environment-based marker.
+	SelfHostedCluster string
 }
 
 // AzureConfig holds configuration for the embedded Azure integration.
@@ -198,7 +204,23 @@ func LoadConfig(ctx context.Context) (*KommodityConfig, error) {
 		DevelopmentMode:         developmentMode,
 		InfrastructureProviders: infrastructureProviders,
 		AzureConfig:             azureConfig,
+		SelfHostedCluster:       getSelfHostedCluster(ctx),
 	}, nil
+}
+
+func getSelfHostedCluster(ctx context.Context) string {
+	logger := logging.FromContext(ctx)
+
+	selfHostedCluster := os.Getenv(envSelfHostedCluster)
+	if selfHostedCluster == "" {
+		logger.Info(configurationNotSpecified,
+			zap.String("envVar", envSelfHostedCluster),
+			zap.String("default", defaultSelfHostedCluster))
+
+		return defaultSelfHostedCluster
+	}
+
+	return selfHostedCluster
 }
 
 func getAzureConfig(ctx context.Context) *AzureConfig {

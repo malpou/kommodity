@@ -14,9 +14,14 @@ import (
 
 	"github.com/Azure/azure-service-operator/v2/pkg/common/annotations"
 	"github.com/Azure/azure-service-operator/v2/pkg/genruntime"
+	"github.com/go-logr/zapr"
 	"github.com/kommodity-io/kommodity/pkg/logging"
 	"go.uber.org/zap"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	clusterv1 "sigs.k8s.io/cluster-api/api/v1beta1"
+	capiutil "sigs.k8s.io/cluster-api/util"
+	capiannotations "sigs.k8s.io/cluster-api/util/annotations"
+	"sigs.k8s.io/cluster-api/util/predicates"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -77,6 +82,10 @@ func (r *Reconciler) SetupWithManager(
 		Named(r.controllerName).
 		For(r.newObj()).
 		WithOptions(opt).
+		WithEventFilter(predicates.ResourceNotPaused(
+			mgr.GetScheme(),
+			zapr.NewLogger(logging.FromContext(ctx)),
+		)).
 		Complete(r)
 	if err != nil {
 		return fmt.Errorf("setting up %s controller: %w", r.controllerName, err)
@@ -102,17 +111,23 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, fmt.Errorf("getting resource: %w", err)
 	}
 
+	paused, err := r.isPaused(ctx, obj)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
+	if paused {
+		logger.Info("Resource or owning Cluster is paused; skipping reconciliation")
+
+		return ctrl.Result{}, nil
+	}
+
 	policy := reconcilePolicyFor(obj)
 
 	if !obj.GetDeletionTimestamp().IsZero() {
 		result, deleteErr := r.reconcileDelete(ctx, obj, policy)
-		if apierrors.IsConflict(deleteErr) {
-			logger.Info("Conflict on delete; requeueing")
 
-			return ctrl.Result{Requeue: true}, nil
-		}
-
-		return result, deleteErr
+		return requeueOnConflict(logger, result, deleteErr)
 	}
 
 	requeue, finalizerErr := r.ensureFinalizers(ctx, obj, policy, logger)
@@ -132,13 +147,48 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	result, normalErr := r.reconcileNormal(ctx, obj)
-	if normalErr != nil && apierrors.IsConflict(normalErr) {
+
+	return requeueOnConflict(logger, result, normalErr)
+}
+
+// requeueOnConflict converts an optimistic-concurrency conflict into a plain
+// requeue so the reconcile is retried against a fresh copy of the object.
+func requeueOnConflict(logger *zap.Logger, result ctrl.Result, err error) (ctrl.Result, error) {
+	if apierrors.IsConflict(err) {
 		logger.Info("Conflict during reconcile; requeueing")
 
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	return result, normalErr
+	return result, err
+}
+
+// isPaused reports whether the ASO object or its owning CAPI Cluster (resolved
+// via the cluster.x-k8s.io/cluster-name label CAPZ stamps on every ASO resource
+// it creates) is paused. The pause check runs before the deletion branch so a
+// paused handover also stops ARM DELETEs, matching upstream CAPI providers.
+func (r *Reconciler) isPaused(ctx context.Context, obj genruntime.ARMMetaObject) (bool, error) {
+	if capiannotations.HasPaused(obj) {
+		return true, nil
+	}
+
+	clusterName := obj.GetLabels()[clusterv1.ClusterNameLabel]
+	if clusterName == "" {
+		// Not CAPZ-owned; there is no Cluster to consult.
+		return false, nil
+	}
+
+	cluster, err := capiutil.GetClusterByName(ctx, r.Client, obj.GetNamespace(), clusterName)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// Orphaned object; preserve the pre-existing reconcile behaviour.
+			return false, nil
+		}
+
+		return false, fmt.Errorf("getting owning cluster %s/%s: %w", obj.GetNamespace(), clusterName, err)
+	}
+
+	return capiannotations.IsPaused(cluster, obj), nil
 }
 
 // ensureFinalizers reconciles the resource's finalizers to match its reconcile

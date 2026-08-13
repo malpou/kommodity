@@ -37,6 +37,13 @@ var crds embed.FS
 //go:embed webhooks/*.yaml
 var webhooks embed.FS
 
+// kommodityWebhooks holds Kommodity-owned webhook manifests. They live outside
+// webhooks/ because scripts/fetch-providers.sh wipes that directory on every
+// `make generate` run.
+//
+//go:embed kommodity/*.yaml
+var kommodityWebhooks embed.FS
+
 // Cache caches provider CRDs to avoid redundant loading.
 type Cache struct {
 	decoder runtime.Serializer
@@ -443,17 +450,26 @@ func (pc *Cache) loadCRDInScheme(group string, obj *unstructured.Unstructured) {
 }
 
 func (pc *Cache) loadWebhookCache(ctx context.Context) error {
+	err := pc.loadWebhookDir(ctx, webhooks, "webhooks")
+	if err != nil {
+		return err
+	}
+
+	return pc.loadWebhookDir(ctx, kommodityWebhooks, "kommodity")
+}
+
+func (pc *Cache) loadWebhookDir(ctx context.Context, fsys embed.FS, dir string) error {
 	logger := logging.FromContext(ctx)
 
-	entries, err := webhooks.ReadDir("webhooks")
+	entries, err := fsys.ReadDir(dir)
 	if err != nil {
-		return fmt.Errorf("failed to read webhook directory: %w", err)
+		return fmt.Errorf("failed to read webhook directory %s: %w", dir, err)
 	}
 
 	for _, entry := range entries {
 		logger.Info("Loading webhook", zap.String("file", entry.Name()))
 
-		webhook, err := webhooks.ReadFile("webhooks/" + entry.Name())
+		webhook, err := fsys.ReadFile(dir + "/" + entry.Name())
 		if err != nil {
 			return fmt.Errorf("failed to read webhook file %s: %w", entry.Name(), err)
 		}

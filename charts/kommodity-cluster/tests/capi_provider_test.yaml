@@ -66,6 +66,22 @@ tests:
       - notExists:
           path: metadata.annotations["kommodity.io/node-cidr"]
 
+  # Self-hosted guardrail annotation tests
+  - it: should not add self-hosted annotation by default
+    template: templates/provider/capi/cluster.yaml
+    asserts:
+      - notExists:
+          path: metadata.annotations["kommodity.io/self-hosted"]
+
+  - it: should add self-hosted annotation when kommodity.selfHosted is true
+    template: templates/provider/capi/cluster.yaml
+    set:
+      kommodity.selfHosted: true
+    asserts:
+      - equal:
+          path: metadata.annotations["kommodity.io/self-hosted"]
+          value: "true"
+
   # nodeCIDR required when talos-cluster-proxy enabled on private IPv4
   # Use Kubevirt provider to bypass Scaleway template's own nodeCIDR requirement.
   - it: should fail when talos-cluster-proxy enabled on private network without nodeCIDR
