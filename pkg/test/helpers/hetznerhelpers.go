@@ -143,6 +143,87 @@ func DeleteAllHetznerServers(ctx context.Context) error {
 	return nil
 }
 
+// CleanupHetznerClusterResources deletes any hcloud resources still labeled as
+// owned by the given CAPH cluster. Best effort: errors are logged, never
+// returned, so it is safe to wire as t.Cleanup even when the test failed
+// mid-teardown and finalizers never ran.
+func CleanupHetznerClusterResources(ctx context.Context, clusterName string) {
+	client, err := getHetznerClient()
+	if err != nil {
+		log.Printf("Hetzner cleanup: failed to get client: %v", err)
+
+		return
+	}
+
+	cleanupHetznerClusterResources(ctx, client, clusterName)
+}
+
+// cleanupHetznerClusterResources deletes all hcloud resources labeled as owned
+// by the given CAPH cluster. Best effort: errors are logged, never returned.
+// Servers go first and networks last, since a network cannot be deleted while
+// servers are still attached; server deletion is async, so a network delete
+// racing a slow server teardown may still fail - logged, not fatal.
+func cleanupHetznerClusterResources(ctx context.Context, client *hcloud.Client, clusterName string) {
+	opts := hcloud.ListOpts{LabelSelector: hetznerClusterLabelSelector(clusterName)}
+
+	servers, err := client.Server.AllWithOpts(ctx, hcloud.ServerListOpts{ListOpts: opts})
+	if err != nil {
+		log.Printf("Hetzner cleanup: failed to list servers: %v", err)
+	}
+
+	for _, server := range servers {
+		_, _, err := client.Server.DeleteWithResult(ctx, server)
+		logHetznerCleanup("server", server.Name, err)
+	}
+
+	loadBalancers, err := client.LoadBalancer.AllWithOpts(ctx, hcloud.LoadBalancerListOpts{ListOpts: opts})
+	if err != nil {
+		log.Printf("Hetzner cleanup: failed to list load balancers: %v", err)
+	}
+
+	for _, loadBalancer := range loadBalancers {
+		_, err := client.LoadBalancer.Delete(ctx, loadBalancer)
+		logHetznerCleanup("load balancer", loadBalancer.Name, err)
+	}
+
+	placementGroups, err := client.PlacementGroup.AllWithOpts(ctx, hcloud.PlacementGroupListOpts{ListOpts: opts})
+	if err != nil {
+		log.Printf("Hetzner cleanup: failed to list placement groups: %v", err)
+	}
+
+	for _, placementGroup := range placementGroups {
+		_, err := client.PlacementGroup.Delete(ctx, placementGroup)
+		logHetznerCleanup("placement group", placementGroup.Name, err)
+	}
+
+	networks, err := client.Network.AllWithOpts(ctx, hcloud.NetworkListOpts{ListOpts: opts})
+	if err != nil {
+		log.Printf("Hetzner cleanup: failed to list networks: %v", err)
+	}
+
+	for _, network := range networks {
+		_, err := client.Network.Delete(ctx, network)
+		logHetznerCleanup("network", network.Name, err)
+	}
+}
+
+// logHetznerCleanup logs the outcome of one best-effort deletion.
+func logHetznerCleanup(kind string, name string, err error) {
+	if err != nil {
+		log.Printf("Hetzner cleanup: failed to delete %s %s: %v", kind, name, err)
+
+		return
+	}
+
+	log.Printf("Hetzner cleanup: deleted leaked %s %s", kind, name)
+}
+
+// hetznerClusterLabelSelector returns the label selector CAPH puts on every
+// hcloud resource it owns for the given cluster.
+func hetznerClusterLabelSelector(clusterName string) string {
+	return "caph-cluster-" + clusterName + "=owned"
+}
+
 // listHetznerClusterServers lists the hcloud servers owned by the given CAPH cluster.
 func listHetznerClusterServers(
 	ctx context.Context,
@@ -151,8 +232,7 @@ func listHetznerClusterServers(
 ) ([]*hcloud.Server, error) {
 	servers, err := client.Server.AllWithOpts(ctx, hcloud.ServerListOpts{
 		ListOpts: hcloud.ListOpts{
-			// CAPH labels every server it owns with caph-cluster-<clustername>=owned.
-			LabelSelector: "caph-cluster-" + clusterName + "=owned",
+			LabelSelector: hetznerClusterLabelSelector(clusterName),
 		},
 	})
 	if err != nil {

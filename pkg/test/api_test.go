@@ -162,6 +162,12 @@ func TestCreateHetznerCluster(t *testing.T) {
 		clusterName = "hetzner-test-cluster"
 	}
 
+	// Sweep leaked hcloud resources even when the test dies between uninstall
+	// and finalizer completion (a load balancer leaked exactly this way once).
+	t.Cleanup(func() {
+		helpers.CleanupHetznerClusterResources(context.Background(), clusterName)
+	})
+
 	// Create secret that holds the Hetzner Cloud API token
 	_, err = client.CoreV1().Secrets("default").Create(ctx, &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
