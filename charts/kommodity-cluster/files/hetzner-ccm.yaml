@@ -1,8 +1,19 @@
-# Source: https://github.com/hetznercloud/hcloud-cloud-controller-manager/blob/main/deploy/ccm.yaml
+# Source: https://github.com/hetznercloud/hcloud-cloud-controller-manager/blob/v1.34.0/deploy/ccm.yaml
 # Deployment of the cloud-controller-manager inside the cluster.
 # Placed in files/ so that it can be rendered as a single manifest by the ClusterResourceSet.
-# The hcloud token Secret is delivered to kube-system as "hcloud" by the kommodity
-# CCM ClusterResourceSet (see kommodity.io/ccm-downstream-secret-name).
+#
+# Deliberate divergences from the upstream manifest:
+#  - image is templated from kommodity.provider.cloudControllerManager.image;
+#  - the HCLOUD_TOKEN secret key is "hcloud", not upstream's "token", because the
+#    kommodity CCM ClusterResourceSet delivers one Secret shared with hcloud-csi
+#    (see kommodity.io/ccm-downstream-secret-name);
+#  - the Robot (bare-metal) env vars are dropped; kommodity wires hcloud only;
+#  - NODE_NAME plus --allocate-node-cidrs/--cluster-cidr/HCLOUD_NETWORK are added
+#    for private-network clusters, where CAPH names the network after the cluster;
+#  - the watch-based route-reconciliation feature gate is dropped, keeping the
+#    periodic --route-reconciliation-period path.
+# Everything else - RBAC scope, securityContext, tolerations, priorityClassName,
+# metrics port - tracks upstream and should be updated with it.
 {{- $privateNetwork := and .Values.kommodity.network.ipv4.enabled (not .Values.kommodity.network.ipv4.public) }}
 ---
 apiVersion: v1
@@ -12,13 +23,78 @@ metadata:
   namespace: kube-system
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: "system:hcloud-cloud-controller-manager"
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - configmaps
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - "*"
+  - apiGroups:
+      - ""
+    resources:
+      - nodes/status
+    verbs:
+      - patch
+  - apiGroups:
+      - ""
+    resources:
+      - services
+    verbs:
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - services/status
+    verbs:
+      - patch
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - serviceaccounts
+    verbs:
+      - create
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - create
+      - get
+      - list
+      - watch
+      - update
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: hcloud-cloud-controller-manager
+  # The ":restricted" suffix originates upstream from removing cluster-admin.
+  name: "system:hcloud-cloud-controller-manager:restricted"
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: cluster-admin
+  name: "system:hcloud-cloud-controller-manager"
 subjects:
   - kind: ServiceAccount
     name: hcloud-cloud-controller-manager
@@ -41,6 +117,12 @@ spec:
         app: hcloud-cloud-controller-manager
     spec:
       serviceAccountName: hcloud-cloud-controller-manager
+      securityContext:
+        runAsGroup: 65532
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
       dnsPolicy: Default
       tolerations:
         # Allow scheduling on uninitialized and control-plane nodes.
@@ -49,13 +131,23 @@ spec:
           effect: "NoSchedule"
         - key: "CriticalAddonsOnly"
           operator: "Exists"
+        - key: "node-role.kubernetes.io/master"
+          effect: NoSchedule
+          operator: Exists
         - key: "node-role.kubernetes.io/control-plane"
           effect: NoSchedule
+          operator: Exists
         - key: "node.kubernetes.io/not-ready"
           effect: "NoExecute"
       containers:
         - name: hcloud-cloud-controller-manager
           image: {{ .Values.kommodity.provider.cloudControllerManager.image.repository }}:{{ .Values.kommodity.provider.cloudControllerManager.image.tag }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
           args:
             - --allow-untagged-cloud
             - --cloud-provider=hcloud
@@ -81,7 +173,11 @@ spec:
             - name: HCLOUD_NETWORK
               value: {{ .Release.Name }}
             {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 8233
           resources:
             requests:
               cpu: 100m
               memory: 50Mi
+      priorityClassName: "system-cluster-critical"

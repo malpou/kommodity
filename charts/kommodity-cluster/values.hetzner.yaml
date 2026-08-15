@@ -14,6 +14,12 @@ kommodity:
       #   hcloud: <YOUR_BASE64_ENCODED_HCLOUD_TOKEN>
       # type: Opaque
       name: hetzner
+    # IMMUTABLE AFTER CREATE: CAPH treats hcloudNetwork, loadBalancer.enabled,
+    # controlPlaneEndpoint.port and kommodity.region (the LB region) as
+    # immutable on HetznerCluster. Kommodity does not run CAPH's validating
+    # webhooks, so a helm upgrade changing any of them is ACCEPTED by the API
+    # server and then silently ignored by the controller - the cluster keeps
+    # using the original network/load balancer. Recreate the cluster instead.
     config: {}
       # Optional: name of an SSH key pre-uploaded to the Hetzner project.
       # Talos has no SSH, so this is usually left unset.
@@ -23,12 +29,12 @@ kommodity:
       # Disable it for single-control-plane setups and set controlPlaneEndpoint
       # to a DNS name pointing at the control-plane machine instead.
       # loadBalancer:
-      #   enabled: true
+      #   enabled: true    # immutable after create
       #   # One of lb11, lb21, lb31 (default lb11).
       #   type: lb11
       # controlPlaneEndpoint:
       #   host: cp.example.com
-      #   port: 6443
+      #   port: 6443       # immutable after create
 
       # Network zone of the private network when kommodity.network.ipv4.public
       # is false. One of eu-central (fsn1/nbg1/hel1, the default), us-east (ash),
@@ -56,6 +62,20 @@ kommodity:
       # public: false attaches nodes to a Hetzner private network instead
       # (nodeCIDR required); note that Hetzner private networks have no
       # managed NAT gateway, so image pulls need user-provided egress.
+      #
+      # With public: false you ALSO need an explicit default route: Hetzner's
+      # DHCP does not announce a user-created 0.0.0.0/0 network route, so
+      # without this nodes have zero egress and bootstrap never pulls images.
+      #   kommodity:
+      #     global:
+      #       strategicPatches:
+      #         machine:
+      #           network:
+      #             interfaces:
+      #               - interface: eth0
+      #                 routes:
+      #                   - network: 0.0.0.0/0
+      #                     gateway: 10.0.0.1   # first usable IP of nodeCIDR
       public: true
       # Required when public is false. Used as the private network and subnet
       # CIDR; all subnets/servers of a network share one network zone.

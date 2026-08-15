@@ -119,30 +119,6 @@ func WaitForHetznerServersDeletion(
 	return nil
 }
 
-// DeleteAllHetznerServers deletes all servers in the Hetzner project of the configured token.
-func DeleteAllHetznerServers(ctx context.Context) error {
-	client, err := getHetznerClient()
-	if err != nil {
-		return fmt.Errorf("failed to get Hetzner client: %w", err)
-	}
-
-	servers, err := client.Server.All(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to list Hetzner servers: %w", err)
-	}
-
-	for _, server := range servers {
-		_, _, err := client.Server.DeleteWithResult(ctx, server)
-		if err != nil {
-			return fmt.Errorf("failed to delete Hetzner server %s: %w", server.Name, err)
-		}
-
-		log.Printf("Deleted Hetzner server %s", server.Name)
-	}
-
-	return nil
-}
-
 // CleanupHetznerClusterResources deletes any hcloud resources still labeled as
 // owned by the given CAPH cluster. Best effort: errors are logged, never
 // returned, so it is safe to wire as t.Cleanup even when the test failed

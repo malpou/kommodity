@@ -152,3 +152,41 @@ tests:
           path: data["ccm.yaml"]
           pattern: "name: hcloud"
         documentIndex: 0
+
+  - it: should render when provider config is null rather than an empty map
+    template: templates/provider/hetzner/cluster.yaml
+    set:
+      kommodity.provider.config: null
+    asserts:
+      - isKind:
+          of: HetznerCluster
+      - equal:
+          path: spec.controlPlaneLoadBalancer.enabled
+          value: true
+      - equal:
+          path: spec.controlPlaneEndpoint.port
+          value: 6443
+
+  - it: should fail when the hcloud-csi addon is enabled without the CCM
+    template: templates/provider/hetzner/cluster.yaml
+    set:
+      kommodity.provider.cloudControllerManager.enabled: false
+    asserts:
+      - failedTemplate:
+          errorMessage: the hcloud-csi addon requires kommodity.provider.cloudControllerManager.enabled=true (it delivers the hcloud Secret the CSI controller mounts); disable the addon or enable the CCM
+
+  - it: should bind the CCM to the scoped ClusterRole, not cluster-admin
+    template: templates/ccm-crs.yaml
+    asserts:
+      - matchRegex:
+          path: data["ccm.yaml"]
+          pattern: 'name: "system:hcloud-cloud-controller-manager"'
+        documentIndex: 0
+      - notMatchRegex:
+          path: data["ccm.yaml"]
+          pattern: "name: cluster-admin"
+        documentIndex: 0
+      - matchRegex:
+          path: data["ccm.yaml"]
+          pattern: readOnlyRootFilesystem
+        documentIndex: 0

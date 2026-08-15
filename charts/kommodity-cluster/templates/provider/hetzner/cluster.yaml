@@ -1,5 +1,15 @@
 {{- if eq .Values.kommodity.provider.name "Hetzner" }}
 {{- $privateNetwork := and .Values.kommodity.network.ipv4.enabled (not .Values.kommodity.network.ipv4.public) }}
+{{- /* `config:` with no value is valid YAML for null, which dig cannot walk. */}}
+{{- $config := .Values.kommodity.provider.config | default dict }}
+{{- /*
+  The hcloud-csi addon consumes the `hcloud` Secret that only the CCM
+  ClusterResourceSet delivers. Without the CCM the addon installs but its
+  controller CrashLoops on a missing Secret, so fail here instead.
+*/}}
+{{- if and (dig "hcloud-csi" "enabled" false .Values.kommodity.addons) (not .Values.kommodity.provider.cloudControllerManager.enabled) }}
+{{- fail "the hcloud-csi addon requires kommodity.provider.cloudControllerManager.enabled=true (it delivers the hcloud Secret the CSI controller mounts); disable the addon or enable the CCM" }}
+{{- end }}
 apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
 kind: HetznerCluster
 metadata:
@@ -13,10 +23,10 @@ spec:
   controlPlaneRegions:
     - {{ .Values.kommodity.region }}
   controlPlaneLoadBalancer:
-    enabled: {{ dig "loadBalancer" "enabled" true .Values.kommodity.provider.config }}
+    enabled: {{ dig "loadBalancer" "enabled" true $config }}
     region: {{ .Values.kommodity.region }}
-    type: {{ dig "loadBalancer" "type" "lb11" .Values.kommodity.provider.config }}
-  {{- $cpe := dig "controlPlaneEndpoint" (dict) .Values.kommodity.provider.config }}
+    type: {{ dig "loadBalancer" "type" "lb11" $config }}
+  {{- $cpe := dig "controlPlaneEndpoint" (dict) $config }}
   {{- /*
     CAPH requires controlPlaneEndpoint to exist before it creates the load
     balancer (the port becomes the LB listen port). With an empty host CAPH
@@ -30,7 +40,7 @@ spec:
     name: {{ .Values.kommodity.provider.secret.name }}
     key:
       hcloudToken: hcloud
-  {{- with (dig "sshKeyName" "" .Values.kommodity.provider.config) }}
+  {{- with (dig "sshKeyName" "" $config) }}
   sshKeys:
     hcloud:
       - name: {{ . }}
@@ -43,7 +53,7 @@ spec:
     enabled: true
     cidrBlock: {{ required "missing required nodeCIDR in kommodity.network.ipv4" .Values.kommodity.network.ipv4.nodeCIDR }}
     subnetCidrBlock: {{ .Values.kommodity.network.ipv4.nodeCIDR }}
-    networkZone: {{ dig "networkZone" "eu-central" .Values.kommodity.provider.config }}
+    networkZone: {{ dig "networkZone" "eu-central" $config }}
   {{- end }}
   # The kommodity CCM ClusterResourceSet delivers the token Secret to the
   # workload cluster, so CAPH must not create a competing copy.

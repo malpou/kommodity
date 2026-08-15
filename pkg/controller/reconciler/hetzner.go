@@ -34,12 +34,11 @@ const (
 	// recovery.
 	hetznerRateLimiterMaxDelay = hetznerRateLimitWaitTime
 
-	// hetznerRateLimiterBucketRate is the overall token-bucket refill rate
-	// for Hetzner reconciliations, keeping steady-state API pressure well
-	// below the per-project limit shared by all clusters in a project.
+	// hetznerRateLimiterBucketRate is the per-controller token-bucket refill
+	// rate for Hetzner reconciliations, damping steady-state reconcile churn.
 	hetznerRateLimiterBucketRate = rate.Limit(0.1)
 
-	// hetznerRateLimiterBucketBurst is the burst size for the overall
+	// hetznerRateLimiterBucketBurst is the burst size for the per-controller
 	// token-bucket limiter.
 	hetznerRateLimiterBucketBurst = 1
 )
@@ -65,19 +64,12 @@ func setupHetzner(ctx context.Context, manager ctrl.Manager, base ctrlcontroller
 	logger := logging.FromContext(ctx)
 	hcloudClientFactory := hcloudclient.NewFactory()
 
-	// One token bucket shared by all Hetzner controllers: they all draw from
-	// the same per-project API budget of 3600 requests per hour. The per-item
-	// exponential backoff is per controller (see newHetznerControllerOptions).
-	sharedBucket := &workqueue.TypedBucketRateLimiter[reconcile.Request]{
-		Limiter: rate.NewLimiter(hetznerRateLimiterBucketRate, hetznerRateLimiterBucketBurst),
-	}
-
 	logger.Info("Setting up HetznerCluster controller")
 
 	err := setupHetznerClusterWithManager(
 		ctx,
 		manager,
-		newHetznerControllerOptions(base, sharedBucket),
+		newHetznerControllerOptions(base),
 		hcloudClientFactory,
 	)
 	if err != nil {
@@ -92,7 +84,7 @@ func setupHetzner(ctx context.Context, manager ctrl.Manager, base ctrlcontroller
 		RateLimitWaitTime:   hetznerRateLimitWaitTime,
 		HCloudClientFactory: hcloudClientFactory,
 		SSHClientFactory:    sshclient.NewFactory(),
-	}).SetupWithManager(ctx, manager, newHetznerControllerOptions(base, sharedBucket))
+	}).SetupWithManager(ctx, manager, newHetznerControllerOptions(base))
 	if err != nil {
 		return fmt.Errorf("failed to setup HCloudMachine controller: %w", err)
 	}
@@ -104,7 +96,7 @@ func setupHetzner(ctx context.Context, manager ctrl.Manager, base ctrlcontroller
 		APIReader:           manager.GetAPIReader(),
 		RateLimitWaitTime:   hetznerRateLimitWaitTime,
 		HCloudClientFactory: hcloudClientFactory,
-	}).SetupWithManager(ctx, manager, newHetznerControllerOptions(base, sharedBucket))
+	}).SetupWithManager(ctx, manager, newHetznerControllerOptions(base))
 	if err != nil {
 		return fmt.Errorf("failed to setup HCloudMachineTemplate controller: %w", err)
 	}
@@ -116,7 +108,7 @@ func setupHetzner(ctx context.Context, manager ctrl.Manager, base ctrlcontroller
 		APIReader:           manager.GetAPIReader(),
 		RateLimitWaitTime:   hetznerRateLimitWaitTime,
 		HCloudClientFactory: hcloudClientFactory,
-	}).SetupWithManager(ctx, manager, newHetznerControllerOptions(base, sharedBucket))
+	}).SetupWithManager(ctx, manager, newHetznerControllerOptions(base))
 	if err != nil {
 		return fmt.Errorf("failed to setup HCloudRemediation controller: %w", err)
 	}
@@ -149,21 +141,27 @@ func setupHetznerClusterWithManager(
 }
 
 // newHetznerControllerOptions takes the base controller options and overrides
-// the RateLimiter with a Hetzner-specific one: a fresh per-item exponential
-// backoff for this controller, combined with the token bucket shared by all
-// Hetzner controllers so their combined API usage respects the per-project
-// budget of 3600 requests per hour.
-func newHetznerControllerOptions(
-	base ctrlcontroller.Options,
-	sharedBucket workqueue.TypedRateLimiter[reconcile.Request],
-) ctrlcontroller.Options {
+// the RateLimiter with a Hetzner-specific one: a per-item exponential backoff
+// combined with a token bucket, both private to this controller.
+//
+// This is coarse admission control on reconcile starts, not an API request
+// budget - one reconcile issues many Hetzner API calls, so the bucket rate
+// does not map onto the per-project limit of 3600 requests per hour. CAPH's
+// own RateLimitWaitTime handles actual API exhaustion. The bucket must not be
+// shared across controllers: TypedMaxOfRateLimiter.When calls When on every
+// sub-limiter, and TypedBucketRateLimiter.When reserves a token even when the
+// exponential backoff wins the max, so a shared bucket drains on requeues it
+// never delays and starves the cluster controller behind machine churn.
+func newHetznerControllerOptions(base ctrlcontroller.Options) ctrlcontroller.Options {
 	opt := base
 	opt.RateLimiter = workqueue.NewTypedMaxOfRateLimiter(
 		workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](
 			hetznerRateLimiterBaseDelay,
 			hetznerRateLimiterMaxDelay,
 		),
-		sharedBucket,
+		&workqueue.TypedBucketRateLimiter[reconcile.Request]{
+			Limiter: rate.NewLimiter(hetznerRateLimiterBucketRate, hetznerRateLimiterBucketBurst),
+		},
 	)
 
 	return opt
