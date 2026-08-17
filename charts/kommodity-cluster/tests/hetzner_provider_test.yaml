@@ -205,6 +205,11 @@ tests:
       - matchRegex:
           path: spec.controlPlaneConfig.controlplane.strategicPatches[2]
           pattern: "physical: true"
+      # A machine-level patch is a bare machine: document. CABPT does not
+      # register MachineConfig as a standalone patch kind.
+      - notMatchRegex:
+          path: spec.controlPlaneConfig.controlplane.strategicPatches[2]
+          pattern: "kind: MachineConfig"
 
   - it: should derive the default-route gateway from a non-default nodeCIDR
     template: templates/talos/controlplane.yaml
