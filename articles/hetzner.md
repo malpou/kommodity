@@ -20,10 +20,10 @@ image with the [`talos-cloud-image` workflow](../.github/workflows/talos-cloud-i
 
 ```bash
 hcloud-upload-image upload \
-  --image-path kommodity-talos-hcloud-v1.13.7.raw \
+  --image-path kommodity-talos-hcloud-v1.13.0.raw \
   --architecture x86 \
-  --description kommodity-talos-hcloud-v1.13.7 \
-  --labels caph-image-name=kommodity-talos-hcloud-v1.13.7
+  --description kommodity-talos-hcloud-v1.13.0 \
+  --labels caph-image-name=kommodity-talos-hcloud-v1.13.0
 ```
 
 The `caph-image-name` label is mandatory: snapshots have no name, so CAPH
@@ -33,7 +33,7 @@ separate `--architecture arm` snapshot with its own image name.
 Plain factory images work too:
 
 ```bash
---image-url https://factory.talos.dev/image/<schematic>/v1.13.7/hcloud-amd64.raw.xz --compression xz
+--image-url https://factory.talos.dev/image/<schematic>/v1.13.0/hcloud-amd64.raw.xz --compression xz
 ```
 
 ## Deploying a cluster

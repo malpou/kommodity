@@ -140,13 +140,13 @@ kommodity:
 
 talos:
   # Keep in sync with the Talos version baked into the snapshot below.
-  version: v1.13.7
+  version: v1.13.0
   # Talos hcloud snapshot in the Hetzner project. CAPH matches snapshots by the
   # caph-image-name label, so upload with
   # https://github.com/apricote/hcloud-upload-image, e.g.:
   #   hcloud-upload-image upload \
-  #     --image-url https://factory.talos.dev/image/<schematic>/v1.13.7/hcloud-amd64.raw.xz \
+  #     --image-url https://factory.talos.dev/image/<schematic>/v1.13.0/hcloud-amd64.raw.xz \
   #     --architecture x86 --compression xz \
-  #     --description kommodity-talos-hcloud-v1.13.7 \
-  #     --labels caph-image-name=kommodity-talos-hcloud-v1.13.7
-  imageName: kommodity-talos-hcloud-v1.13.7
+  #     --description kommodity-talos-hcloud-v1.13.0 \
+  #     --labels caph-image-name=kommodity-talos-hcloud-v1.13.0
+  imageName: kommodity-talos-hcloud-v1.13.0
