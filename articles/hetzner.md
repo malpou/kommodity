@@ -99,6 +99,22 @@ need two things, neither of which the chart can create for you:
    `10.0.0.1` (Hetzner's own gateway), which then follows the network route to
    the NAT server.
 
+   Select the device instead of naming it. Hetzner's private NIC is `enp7s0`,
+   not `eth0`, so a hardcoded `eth0` applies the route to the wrong device and
+   the node ends up with no egress at all, with nothing in the machine config to
+   suggest why. With `public: false` the private NIC is the only physical
+   device:
+
+   ```yaml
+   interfaces:
+     - deviceSelector:
+         physical: true
+       dhcp: true
+       routes:
+         - network: 0.0.0.0/0
+           gateway: 10.0.0.1
+   ```
+
 **Ordering matters.** CAPH creates the network itself and cannot adopt an
 existing one, so the network does not exist until the cluster does. But nodes
 boot immediately and start pulling images, so a NAT server attached after they
@@ -108,11 +124,13 @@ also reserves `10.0.0.2` for the control-plane load balancer, so do not plan on
 that address for the NAT server.
 
 **Zero-touch bootstrap needs the workflow-built snapshot.** The chart always
-delivers an `ExtensionServiceConfig` for `kommodity-autobootstrap`. A plain
-factory image does not contain that extension, and on a private cluster there is
-no public-IP path for the control-plane provider to bootstrap through instead, so
-the node never finishes booting. Use a snapshot built by the
-`talos-cloud-image` workflow (extensions baked in) for `public: false`.
+delivers an `ExtensionServiceConfig` for `kommodity-autobootstrap`, and a plain
+factory image does not contain that extension. On a private cluster there is no
+public-IP path for the control-plane provider to bootstrap through instead, so
+use a snapshot built by the `talos-cloud-image` workflow (platform `hcloud`,
+extensions baked in) for `public: false`. With that snapshot and the device
+selector above, a private cluster bootstraps with no manual `talosctl bootstrap`
+and no public IP on any node.
 
 ## DNS
 

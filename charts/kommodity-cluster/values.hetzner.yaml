@@ -66,13 +66,19 @@ kommodity:
       # With public: false you ALSO need an explicit default route: Hetzner's
       # DHCP does not announce a user-created 0.0.0.0/0 network route, so
       # without this nodes have zero egress and bootstrap never pulls images.
+      # Select the device rather than naming it: on Hetzner the private NIC is
+      # enp7s0 (eth0 is the public one), so a hardcoded eth0 silently applies
+      # the route to the wrong device and leaves the node with no egress. With
+      # public: false the private NIC is the only physical device.
       #   kommodity:
       #     global:
       #       strategicPatches:
       #         machine:
       #           network:
       #             interfaces:
-      #               - interface: eth0
+      #               - deviceSelector:
+      #                   physical: true
+      #                 dhcp: true
       #                 routes:
       #                   - network: 0.0.0.0/0
       #                     gateway: 10.0.0.1   # first usable IP of nodeCIDR
