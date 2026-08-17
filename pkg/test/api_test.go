@@ -163,7 +163,7 @@ func TestCreateHetznerCluster(t *testing.T) {
 	}
 
 	// Sweep leaked hcloud resources even when the test dies between uninstall
-	// and finalizer completion (a load balancer leaked exactly this way once).
+	// and finalizer completion.
 	t.Cleanup(func() {
 		helpers.CleanupHetznerClusterResources(context.Background(), clusterName)
 	})

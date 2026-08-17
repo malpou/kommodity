@@ -1,0 +1,23 @@
+{{/*
+MachineConfig document setting the node's default route.
+Used as a strategic patch in TalosConfigTemplate and TalosControlPlane.
+The gateway is the first usable address of the given CIDR, and the interface is
+matched by selector so it does not depend on kernel interface naming.
+*/}}
+{{- define "kommodity.talos.defaultRoute" -}}
+{{- $cidr := required "kommodity.network.ipv4.nodeCIDR is required when public is false" .nodeCIDR -}}
+{{- $octets := splitList "/" $cidr | first | splitList "." -}}
+{{- $gateway := printf "%s.%s.%s.%d" (index $octets 0) (index $octets 1) (index $octets 2) (add (int (index $octets 3)) 1) -}}
+- |
+  apiVersion: v1alpha1
+  kind: MachineConfig
+  machine:
+    network:
+      interfaces:
+        - deviceSelector:
+            physical: true
+          dhcp: true
+          routes:
+            - network: 0.0.0.0/0
+              gateway: {{ $gateway }}
+{{- end -}}

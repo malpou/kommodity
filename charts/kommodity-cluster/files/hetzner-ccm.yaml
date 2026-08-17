@@ -89,7 +89,7 @@ rules:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  # The ":restricted" suffix originates upstream from removing cluster-admin.
+  # Upstream's scoped ClusterRole for the CCM; ":restricted" is part of its name.
   name: "system:hcloud-cloud-controller-manager:restricted"
 roleRef:
   apiGroup: rbac.authorization.k8s.io

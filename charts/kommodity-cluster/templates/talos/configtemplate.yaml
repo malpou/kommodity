@@ -39,12 +39,12 @@ spec:
 {{- include "kommodity.talos.attestationExtensionServiceConfig" (dict "logLevel" $.Values.kommodity.logLevel) | nindent 6 }}
       {{- end }}
       {{- if $hetznerPrivate }}
-      {{- /* Default route: Hetzner DHCP does not announce the network's 0.0.0.0/0 route */ -}}
-{{- include "kommodity.hetzner.defaultRoutePatch" (dict "nodeCIDR" $.Values.kommodity.network.ipv4.nodeCIDR) | nindent 6 }}
+      {{- /* Hetzner's DHCP does not announce the network's 0.0.0.0/0 route */ -}}
+{{- include "kommodity.talos.defaultRoute" (dict "nodeCIDR" $.Values.kommodity.network.ipv4.nodeCIDR) | nindent 6 }}
       {{- end }}
       {{- if $hetznerNameservers }}
-      {{- /* Hetzner's recursors serve stale NXDOMAIN for new records; Talos propagates these to CoreDNS too */ -}}
-{{- include "kommodity.hetzner.resolverConfig" (dict "nameservers" $hetznerNameservers) | nindent 6 }}
+      {{- /* Nameservers for the node, propagated by Talos to CoreDNS */ -}}
+{{- include "kommodity.talos.resolverConfig" (dict "nameservers" $hetznerNameservers) | nindent 6 }}
       {{- end }}
       {{- end }}
 {{- end }}

@@ -78,37 +78,36 @@ func setupHetzner(ctx context.Context, manager ctrl.Manager, base ctrlcontroller
 
 	logger.Info("Setting up HCloudMachine controller")
 
-	err = (&caph_controllers.HCloudMachineReconciler{
-		Client:              manager.GetClient(),
-		APIReader:           manager.GetAPIReader(),
-		RateLimitWaitTime:   hetznerRateLimitWaitTime,
-		HCloudClientFactory: hcloudClientFactory,
-		SSHClientFactory:    sshclient.NewFactory(),
-	}).SetupWithManager(ctx, manager, newHetznerControllerOptions(base))
+	err = setupHCloudMachineWithManager(
+		ctx,
+		manager,
+		newHetznerControllerOptions(base),
+		hcloudClientFactory,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to setup HCloudMachine controller: %w", err)
 	}
 
 	logger.Info("Setting up HCloudMachineTemplate controller")
 
-	err = (&caph_controllers.HCloudMachineTemplateReconciler{
-		Client:              manager.GetClient(),
-		APIReader:           manager.GetAPIReader(),
-		RateLimitWaitTime:   hetznerRateLimitWaitTime,
-		HCloudClientFactory: hcloudClientFactory,
-	}).SetupWithManager(ctx, manager, newHetznerControllerOptions(base))
+	err = setupHCloudMachineTemplateWithManager(
+		ctx,
+		manager,
+		newHetznerControllerOptions(base),
+		hcloudClientFactory,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to setup HCloudMachineTemplate controller: %w", err)
 	}
 
 	logger.Info("Setting up HCloudRemediation controller")
 
-	err = (&caph_controllers.HCloudRemediationReconciler{
-		Client:              manager.GetClient(),
-		APIReader:           manager.GetAPIReader(),
-		RateLimitWaitTime:   hetznerRateLimitWaitTime,
-		HCloudClientFactory: hcloudClientFactory,
-	}).SetupWithManager(ctx, manager, newHetznerControllerOptions(base))
+	err = setupHCloudRemediationWithManager(
+		ctx,
+		manager,
+		newHetznerControllerOptions(base),
+		hcloudClientFactory,
+	)
 	if err != nil {
 		return fmt.Errorf("failed to setup HCloudRemediation controller: %w", err)
 	}
@@ -127,10 +126,9 @@ func setupHetznerClusterWithManager(
 		APIReader:           manager.GetAPIReader(),
 		RateLimitWaitTime:   hetznerRateLimitWaitTime,
 		HCloudClientFactory: hcloudClientFactory,
-		// Upstream CAPH waits on this group after manager shutdown to drain
-		// per-workload-cluster target managers. The combined kommodity binary
-		// has no post-manager teardown hook for modules, so that wait is
-		// intentionally dropped; the goroutines are abandoned at process exit.
+		// CAPH waits on this group to drain per-workload-cluster target
+		// managers after manager shutdown. Kommodity has no post-manager
+		// teardown hook, so the goroutines stop at process exit.
 		TargetClusterManagersWaitGroup: &sync.WaitGroup{},
 	}).SetupWithManager(ctx, manager, opt)
 	if err != nil {
@@ -140,21 +138,79 @@ func setupHetznerClusterWithManager(
 	return nil
 }
 
+func setupHCloudMachineWithManager(
+	ctx context.Context,
+	manager ctrl.Manager,
+	opt ctrlcontroller.Options,
+	hcloudClientFactory hcloudclient.Factory,
+) error {
+	err := (&caph_controllers.HCloudMachineReconciler{
+		Client:              manager.GetClient(),
+		APIReader:           manager.GetAPIReader(),
+		RateLimitWaitTime:   hetznerRateLimitWaitTime,
+		HCloudClientFactory: hcloudClientFactory,
+		SSHClientFactory:    sshclient.NewFactory(),
+	}).SetupWithManager(ctx, manager, opt)
+	if err != nil {
+		return fmt.Errorf("failed to setup HCloudMachine reconciler: %w", err)
+	}
+
+	return nil
+}
+
+func setupHCloudMachineTemplateWithManager(
+	ctx context.Context,
+	manager ctrl.Manager,
+	opt ctrlcontroller.Options,
+	hcloudClientFactory hcloudclient.Factory,
+) error {
+	err := (&caph_controllers.HCloudMachineTemplateReconciler{
+		Client:              manager.GetClient(),
+		APIReader:           manager.GetAPIReader(),
+		RateLimitWaitTime:   hetznerRateLimitWaitTime,
+		HCloudClientFactory: hcloudClientFactory,
+	}).SetupWithManager(ctx, manager, opt)
+	if err != nil {
+		return fmt.Errorf("failed to setup HCloudMachineTemplate reconciler: %w", err)
+	}
+
+	return nil
+}
+
+func setupHCloudRemediationWithManager(
+	ctx context.Context,
+	manager ctrl.Manager,
+	opt ctrlcontroller.Options,
+	hcloudClientFactory hcloudclient.Factory,
+) error {
+	err := (&caph_controllers.HCloudRemediationReconciler{
+		Client:              manager.GetClient(),
+		APIReader:           manager.GetAPIReader(),
+		RateLimitWaitTime:   hetznerRateLimitWaitTime,
+		HCloudClientFactory: hcloudClientFactory,
+	}).SetupWithManager(ctx, manager, opt)
+	if err != nil {
+		return fmt.Errorf("failed to setup HCloudRemediation reconciler: %w", err)
+	}
+
+	return nil
+}
+
 // newHetznerControllerOptions takes the base controller options and overrides
 // the RateLimiter with a Hetzner-specific one: a per-item exponential backoff
 // combined with a token bucket, both private to this controller.
 //
-// This is coarse admission control on reconcile starts, not an API request
-// budget - one reconcile issues many Hetzner API calls, so the bucket rate
-// does not map onto the per-project limit of 3600 requests per hour. CAPH's
-// own RateLimitWaitTime handles actual API exhaustion. The bucket must not be
-// shared across controllers: TypedMaxOfRateLimiter.When calls When on every
+// Coarse admission control on reconcile starts. One reconcile issues many
+// Hetzner API calls, so this does not track the per-project budget of 3600
+// requests per hour; CAPH's RateLimitWaitTime handles API exhaustion.
+//
+// The bucket is per-controller: TypedMaxOfRateLimiter.When calls When on every
 // sub-limiter, and TypedBucketRateLimiter.When reserves a token even when the
-// exponential backoff wins the max, so a shared bucket drains on requeues it
-// never delays and starves the cluster controller behind machine churn.
+// exponential backoff wins the max, so one bucket shared across controllers
+// would drain on requeues it never delays.
 func newHetznerControllerOptions(base ctrlcontroller.Options) ctrlcontroller.Options {
 	opt := base
-	opt.RateLimiter = workqueue.NewTypedMaxOfRateLimiter(
+	opt.RateLimiter = workqueue.NewTypedMaxOfRateLimiter[reconcile.Request](
 		workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](
 			hetznerRateLimiterBaseDelay,
 			hetznerRateLimiterMaxDelay,

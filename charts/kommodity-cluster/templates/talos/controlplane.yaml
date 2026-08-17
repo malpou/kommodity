@@ -65,6 +65,7 @@ spec:
         "disableCNI" $.Values.talos.disableCNI
         "disableProxy" $.Values.talos.disableKubeProxy
       ) | trim -}}
+      {{- $hetznerPrivate := and (eq $.Values.kommodity.provider.name "Hetzner") (not $.Values.kommodity.network.ipv4.public) }}
       {{- $hetznerNameservers := ternary (dig "nameservers" (list) $.Values.kommodity.network) (list) (eq $.Values.kommodity.provider.name "Hetzner") }}
       {{- $needsStrategicPatches := or (not (empty $mergedPatch)) $.Values.kommodity.kms.enabled (not $.Values.kommodity.network.ipv4.public) $.Values.talos.autoBootstrap.enabled $.Values.kommodity.security.enabled (not (empty $hetznerNameservers)) }}
       {{- if $needsStrategicPatches }}
@@ -81,13 +82,13 @@ spec:
       {{- /* ExtensionServiceConfig for kommodity-autobootstrap extension */ -}}
 {{- include "kommodity.talos.autoBootstrapExtensionServiceConfig" (dict "autoBootstrap" $.Values.talos.autoBootstrap "logLevel" $.Values.kommodity.logLevel) | nindent 6 }}
       {{- end }}
-      {{- if and (eq $.Values.kommodity.provider.name "Hetzner") (not $.Values.kommodity.network.ipv4.public) }}
-      {{- /* Default route: Hetzner DHCP does not announce the network's 0.0.0.0/0 route */ -}}
-{{- include "kommodity.hetzner.defaultRoutePatch" (dict "nodeCIDR" $.Values.kommodity.network.ipv4.nodeCIDR) | nindent 6 }}
+      {{- if $hetznerPrivate }}
+      {{- /* Hetzner's DHCP does not announce the network's 0.0.0.0/0 route */ -}}
+{{- include "kommodity.talos.defaultRoute" (dict "nodeCIDR" $.Values.kommodity.network.ipv4.nodeCIDR) | nindent 6 }}
       {{- end }}
-      {{- if and (eq $.Values.kommodity.provider.name "Hetzner") $hetznerNameservers }}
-      {{- /* Hetzner's recursors serve stale NXDOMAIN for new records; Talos propagates these to CoreDNS too */ -}}
-{{- include "kommodity.hetzner.resolverConfig" (dict "nameservers" $hetznerNameservers) | nindent 6 }}
+      {{- if $hetznerNameservers }}
+      {{- /* Nameservers for the node, propagated by Talos to CoreDNS */ -}}
+{{- include "kommodity.talos.resolverConfig" (dict "nameservers" $hetznerNameservers) | nindent 6 }}
       {{- end }}
       {{- if $.Values.kommodity.security.enabled }}
       {{- /* ExtensionServiceConfig for kommodity-attestation extension */ -}}

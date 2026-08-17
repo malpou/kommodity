@@ -17,9 +17,8 @@ kommodity:
     # IMMUTABLE AFTER CREATE: CAPH treats hcloudNetwork, loadBalancer.enabled,
     # controlPlaneEndpoint.port and kommodity.region (the LB region) as
     # immutable on HetznerCluster. Kommodity does not run CAPH's validating
-    # webhooks, so a helm upgrade changing any of them is ACCEPTED by the API
-    # server and then silently ignored by the controller - the cluster keeps
-    # using the original network/load balancer. Recreate the cluster instead.
+    # webhooks, so a helm upgrade changing any of them is accepted by the API
+    # server but has no effect. Recreate the cluster instead.
     config: {}
       # Optional: name of an SSH key pre-uploaded to the Hetzner project.
       # Talos has no SSH, so this is usually left unset.
@@ -59,10 +58,9 @@ kommodity:
     # Nameservers for the nodes, propagated by Talos to CoreDNS as well.
     #
     # Hetzner's platform config points nodes at the provider's own recursors
-    # (185.12.64.1/.2), which have been observed serving NXDOMAIN for a freshly
-    # created public record long after it resolved everywhere else. That breaks
-    # anything doing an in-cluster self-check of a public name, cert-manager's
-    # HTTP-01 solver most visibly. These are Talos's own defaults.
+    # (185.12.64.1/.2), which serve NXDOMAIN for newly created public records
+    # well past the record's TTL. That breaks in-cluster self-checks of a public
+    # name, cert-manager's HTTP-01 solver most visibly.
     #
     # Set to an empty list to keep whatever Hetzner's DHCP hands out.
     nameservers:
@@ -76,13 +74,11 @@ kommodity:
       # (nodeCIDR required); note that Hetzner private networks have no
       # managed NAT gateway, so image pulls need user-provided egress.
       #
-      # With public: false the chart injects the node-side default route for
-      # you (gateway = first usable IP of nodeCIDR, device selected rather than
-      # named, because Hetzner's private NIC is enp7s0 and not eth0). Hetzner's
-      # DHCP does not announce the user-created 0.0.0.0/0 network route, so
-      # without it nodes have zero egress and never finish bootstrap.
+      # Hetzner's DHCP does not announce the 0.0.0.0/0 network route, so with
+      # public: false the chart configures the node-side default route, with
+      # the gateway at the first usable address of nodeCIDR.
       #
-      # You still provide the egress itself: a NAT server on the same network
+      # The egress itself is yours to provide: a NAT server on the same network
       # plus a 0.0.0.0/0 network route pointing at it. See articles/hetzner.md.
       public: true
       # Required when public is false. Used as the private network and subnet

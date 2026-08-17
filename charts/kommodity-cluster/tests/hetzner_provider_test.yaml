@@ -197,11 +197,11 @@ tests:
       kommodity.network.ipv4.public: false
       kommodity.network.ipv4.nodeCIDR: 10.0.0.0/16
     asserts:
-      # Gateway is the first usable address of nodeCIDR, not a hardcoded value.
+      # Gateway is the first usable address of nodeCIDR.
       - matchRegex:
           path: spec.controlPlaneConfig.controlplane.strategicPatches[2]
           pattern: "gateway: 10\\.0\\.0\\.1"
-      # Selected by device, because Hetzner's private NIC is enp7s0, not eth0.
+      # Hetzner's private NIC is enp7s0, so the interface is matched by selector.
       - matchRegex:
           path: spec.controlPlaneConfig.controlplane.strategicPatches[2]
           pattern: "physical: true"
@@ -226,7 +226,7 @@ tests:
   - it: should point nodes at public resolvers by default
     template: templates/talos/controlplane.yaml
     asserts:
-      # Talos propagates these to CoreDNS, so this covers pod DNS too.
+      # Talos propagates these to CoreDNS, so they cover pod DNS as well.
       - matchRegex:
           path: spec.controlPlaneConfig.controlplane.strategicPatches[1]
           pattern: "kind: ResolverConfig"

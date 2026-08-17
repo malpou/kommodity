@@ -100,39 +100,34 @@ need two things, neither of which the chart can create for you:
    hcloud network add-route <network> --destination 0.0.0.0/0 --gateway <nat-private-ip>
    ```
 
-The matching node-side default route is generated for you: Hetzner's DHCP does
-not announce the network route, so the chart injects one automatically whenever
-`public: false`, with the gateway derived from `nodeCIDR`. No machine patch to
-write.
+Hetzner's DHCP does not announce the network route, so the chart configures the
+node-side default route whenever `public: false`, with the gateway at the first
+usable address of `nodeCIDR`.
 
-**Ordering matters.** CAPH creates the network itself and cannot adopt an
-existing one, so the network does not exist until the cluster does. But nodes
-boot immediately and start pulling images, so a NAT server attached after they
-boot is already too late. Either create the cluster, attach NAT, and reboot the
-nodes, or keep a NAT server ready to attach the moment the network appears. CAPH
-also reserves `10.0.0.2` for the control-plane load balancer, so do not plan on
-that address for the NAT server.
+**Ordering.** CAPH creates the network and cannot adopt an existing one, so the
+network does not exist before the cluster. Nodes begin pulling images as soon as
+they boot, so have a NAT server ready to attach the moment the network appears;
+nodes that boot without egress need a reboot once NAT is in place. CAPH reserves
+the second usable address of `nodeCIDR` for the control-plane load balancer, so
+do not assign it to the NAT server.
 
-**Zero-touch bootstrap needs the workflow-built snapshot.** The chart always
-delivers an `ExtensionServiceConfig` for `kommodity-autobootstrap`, and a plain
-factory image does not contain that extension. On a private cluster there is no
-public-IP path for the control-plane provider to bootstrap through instead, so
-use a snapshot built by the `talos-cloud-image` workflow (platform `hcloud`,
-extensions baked in) for `public: false`. With that snapshot, a private cluster
-bootstraps with no manual `talosctl bootstrap` and no public IP on any node.
+**Private clusters require the workflow-built snapshot.** The chart always
+delivers an `ExtensionServiceConfig` for `kommodity-autobootstrap`, which is
+baked into snapshots from the `talos-cloud-image` workflow and absent from
+factory images. With `public: false` there is no public-IP fallback path for
+bootstrap, so use a workflow-built snapshot.
 
 ## DNS
 
-Nodes point at `1.1.1.1` and `8.8.8.8` rather than Hetzner's recursors
-(`185.12.64.1`/`185.12.64.2`), which have been observed returning `NXDOMAIN` for
-a *newly created* public record long after it resolved everywhere else. That
-breaks anything doing an in-cluster self-check of a public name, cert-manager's
-HTTP-01 solver most visibly: the challenge answers correctly from the internet,
-but the self-check fails and the certificate never issues.
+Nodes point at `1.1.1.1` and `8.8.8.8` instead of Hetzner's recursors
+(`185.12.64.1`/`185.12.64.2`), which serve `NXDOMAIN` for newly created public
+records well past the record's TTL. That breaks in-cluster self-checks of a
+public name, cert-manager's HTTP-01 solver most visibly: the challenge answers
+correctly from the internet, but the solver's own lookup fails and the
+certificate never issues.
 
-The chart sets this through Talos's `ResolverConfig`, which covers pod DNS too:
-Talos propagates the node nameservers to CoreDNS, so there is no separate
-CoreDNS change to make. Override or opt out with:
+The chart sets this through Talos's `ResolverConfig`; Talos propagates the node
+nameservers to CoreDNS, so pod DNS follows. Override or opt out with:
 
 ```yaml
 kommodity:
@@ -145,8 +140,8 @@ kommodity:
 Hetzner allows **3600 requests/hour per project**, refilling one per second.
 The CAPH reconcilers run behind a token-bucket work-queue limiter plus CAPH's
 own 5-minute back-off, but the budget is shared with everything else in the
-project, including cluster-autoscaler, whose default scan interval is known
-to exhaust it. Higher limits can be requested from Hetzner support.
+project, including cluster-autoscaler, whose default scan interval exhausts it
+on its own. Higher limits can be requested from Hetzner support.
 
 ## Costs and teardown
 

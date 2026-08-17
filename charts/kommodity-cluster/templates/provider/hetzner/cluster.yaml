@@ -3,9 +3,9 @@
 {{- /* `config:` with no value is valid YAML for null, which dig cannot walk. */}}
 {{- $config := .Values.kommodity.provider.config | default dict }}
 {{- /*
-  The hcloud-csi addon consumes the `hcloud` Secret that only the CCM
-  ClusterResourceSet delivers. Without the CCM the addon installs but its
-  controller CrashLoops on a missing Secret, so fail here instead.
+  The hcloud-csi addon mounts the `hcloud` Secret that only the CCM
+  ClusterResourceSet delivers, so the combination is rejected at render time
+  rather than leaving the CSI controller without its Secret.
 */}}
 {{- if and (dig "hcloud-csi" "enabled" false .Values.kommodity.addons) (not .Values.kommodity.provider.cloudControllerManager.enabled) }}
 {{- fail "the hcloud-csi addon requires kommodity.provider.cloudControllerManager.enabled=true (it delivers the hcloud Secret the CSI controller mounts); disable the addon or enable the CCM" }}
