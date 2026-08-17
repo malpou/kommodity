@@ -23,7 +23,8 @@ spec:
         "logLevel" $.Values.kommodity.logLevel
       ) | trim -}}
       {{- $hetznerPrivate := and (eq $.Values.kommodity.provider.name "Hetzner") (not $.Values.kommodity.network.ipv4.public) }}
-      {{- $needsStrategicPatches := or (not (empty $mergedPatch)) $.Values.kommodity.kms.enabled $.Values.kommodity.security.enabled $hetznerPrivate }}
+      {{- $hetznerNameservers := ternary (dig "nameservers" (list) $.Values.kommodity.network) (list) (eq $.Values.kommodity.provider.name "Hetzner") }}
+      {{- $needsStrategicPatches := or (not (empty $mergedPatch)) $.Values.kommodity.kms.enabled $.Values.kommodity.security.enabled $hetznerPrivate (not (empty $hetznerNameservers)) }}
       {{- if $needsStrategicPatches }}
       strategicPatches:
       {{- if not (empty $mergedPatch) }}
@@ -40,6 +41,10 @@ spec:
       {{- if $hetznerPrivate }}
       {{- /* Default route: Hetzner DHCP does not announce the network's 0.0.0.0/0 route */ -}}
 {{- include "kommodity.hetzner.defaultRoutePatch" (dict "nodeCIDR" $.Values.kommodity.network.ipv4.nodeCIDR) | nindent 6 }}
+      {{- end }}
+      {{- if $hetznerNameservers }}
+      {{- /* Hetzner's recursors serve stale NXDOMAIN for new records; Talos propagates these to CoreDNS too */ -}}
+{{- include "kommodity.hetzner.resolverConfig" (dict "nameservers" $hetznerNameservers) | nindent 6 }}
       {{- end }}
       {{- end }}
 {{- end }}

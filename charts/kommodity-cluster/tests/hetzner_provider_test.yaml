@@ -199,11 +199,11 @@ tests:
     asserts:
       # Gateway is the first usable address of nodeCIDR, not a hardcoded value.
       - matchRegex:
-          path: spec.controlPlaneConfig.controlplane.strategicPatches[-1]
+          path: spec.controlPlaneConfig.controlplane.strategicPatches[2]
           pattern: "gateway: 10\\.0\\.0\\.1"
       # Selected by device, because Hetzner's private NIC is enp7s0, not eth0.
       - matchRegex:
-          path: spec.controlPlaneConfig.controlplane.strategicPatches[-1]
+          path: spec.controlPlaneConfig.controlplane.strategicPatches[2]
           pattern: "physical: true"
 
   - it: should derive the default-route gateway from a non-default nodeCIDR
@@ -213,12 +213,32 @@ tests:
       kommodity.network.ipv4.nodeCIDR: 10.42.0.0/16
     asserts:
       - matchRegex:
-          path: spec.controlPlaneConfig.controlplane.strategicPatches[-1]
+          path: spec.controlPlaneConfig.controlplane.strategicPatches[2]
           pattern: "gateway: 10\\.42\\.0\\.1"
 
   - it: should not inject a default route on public clusters
     template: templates/talos/controlplane.yaml
     asserts:
       - notMatchRegex:
-          path: spec.controlPlaneConfig.controlplane.strategicPatches[-1]
+          path: spec.controlPlaneConfig.controlplane.strategicPatches[1]
           pattern: "0\\.0\\.0\\.0/0"
+
+  - it: should point nodes at public resolvers by default
+    template: templates/talos/controlplane.yaml
+    asserts:
+      # Talos propagates these to CoreDNS, so this covers pod DNS too.
+      - matchRegex:
+          path: spec.controlPlaneConfig.controlplane.strategicPatches[1]
+          pattern: "kind: ResolverConfig"
+      - matchRegex:
+          path: spec.controlPlaneConfig.controlplane.strategicPatches[1]
+          pattern: "address: 1\\.1\\.1\\.1"
+
+  - it: should allow opting out of the resolver override
+    template: templates/talos/controlplane.yaml
+    set:
+      kommodity.network.nameservers: []
+    asserts:
+      - notMatchRegex:
+          path: spec.controlPlaneConfig.controlplane.strategicPatches[1]
+          pattern: "kind: ResolverConfig"

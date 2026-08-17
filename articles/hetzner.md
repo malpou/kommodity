@@ -123,17 +123,21 @@ bootstraps with no manual `talosctl bootstrap` and no public IP on any node.
 
 ## DNS
 
-Nodes resolve through Talos host DNS, which forwards to Hetzner's recursors
-(`185.12.64.1`/`185.12.64.2`), and CoreDNS inherits those via
-`forward . /etc/resolv.conf`. Those recursors have been observed returning
-`NXDOMAIN` for a *newly created* public record long after it resolved elsewhere,
-which breaks anything doing an in-cluster self-check of a public name.
-cert-manager's HTTP-01 solver is the usual casualty: the challenge answers
-correctly from the internet, but the self-check fails and the certificate never
-issues. Point CoreDNS at a public resolver if you hit it:
+Nodes point at `1.1.1.1` and `8.8.8.8` rather than Hetzner's recursors
+(`185.12.64.1`/`185.12.64.2`), which have been observed returning `NXDOMAIN` for
+a *newly created* public record long after it resolved everywhere else. That
+breaks anything doing an in-cluster self-check of a public name, cert-manager's
+HTTP-01 solver most visibly: the challenge answers correctly from the internet,
+but the self-check fails and the certificate never issues.
 
-```bash
-kubectl -n kube-system edit cm coredns   # forward . 1.1.1.1 8.8.8.8
+The chart sets this through Talos's `ResolverConfig`, which covers pod DNS too:
+Talos propagates the node nameservers to CoreDNS, so there is no separate
+CoreDNS change to make. Override or opt out with:
+
+```yaml
+kommodity:
+  network:
+    nameservers: []   # keep whatever Hetzner's DHCP hands out
 ```
 
 ## Rate limits

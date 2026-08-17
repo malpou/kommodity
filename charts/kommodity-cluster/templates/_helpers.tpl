@@ -394,3 +394,27 @@ eth0, and with public: false it is the only physical device.
             - network: 0.0.0.0/0
               gateway: {{ $gateway }}
 {{- end -}}
+
+{{/*
+ResolverConfig for Hetzner clusters.
+
+Talos defaults to 1.1.1.1/8.8.8.8, but Hetzner's platform config replaces those
+with the provider's own recursors (185.12.64.1/.2). Those have been observed
+returning NXDOMAIN for a freshly created public record long after it resolved
+everywhere else, which breaks any in-cluster self-check of a public name -
+cert-manager's HTTP-01 solver being the usual casualty.
+
+Talos propagates these nameservers to CoreDNS as well, so setting them here
+fixes host and pod resolution together. Override with
+kommodity.network.nameservers, or set it to an empty list to keep whatever
+Hetzner's DHCP hands out.
+*/}}
+{{- define "kommodity.hetzner.resolverConfig" -}}
+- |
+  apiVersion: v1alpha1
+  kind: ResolverConfig
+  nameservers:
+  {{- range .nameservers }}
+    - address: {{ . }}
+  {{- end }}
+{{- end -}}

@@ -56,6 +56,19 @@ kommodity:
             cloud-provider: external
 
   network:
+    # Nameservers for the nodes, propagated by Talos to CoreDNS as well.
+    #
+    # Hetzner's platform config points nodes at the provider's own recursors
+    # (185.12.64.1/.2), which have been observed serving NXDOMAIN for a freshly
+    # created public record long after it resolved everywhere else. That breaks
+    # anything doing an in-cluster self-check of a public name, cert-manager's
+    # HTTP-01 solver most visibly. These are Talos's own defaults.
+    #
+    # Set to an empty list to keep whatever Hetzner's DHCP hands out.
+    nameservers:
+      - 1.1.1.1
+      - 8.8.8.8
+
     ipv4:
       enabled: true
       # With public: true every node gets a public IPv4/IPv6 address. Setting
