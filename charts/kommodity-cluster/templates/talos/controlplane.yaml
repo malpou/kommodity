@@ -80,6 +80,10 @@ spec:
       {{- /* ExtensionServiceConfig for kommodity-autobootstrap extension */ -}}
 {{- include "kommodity.talos.autoBootstrapExtensionServiceConfig" (dict "autoBootstrap" $.Values.talos.autoBootstrap "logLevel" $.Values.kommodity.logLevel) | nindent 6 }}
       {{- end }}
+      {{- if and (eq $.Values.kommodity.provider.name "Hetzner") (not $.Values.kommodity.network.ipv4.public) }}
+      {{- /* Default route: Hetzner DHCP does not announce the network's 0.0.0.0/0 route */ -}}
+{{- include "kommodity.hetzner.defaultRoutePatch" (dict "nodeCIDR" $.Values.kommodity.network.ipv4.nodeCIDR) | nindent 6 }}
+      {{- end }}
       {{- if $.Values.kommodity.security.enabled }}
       {{- /* ExtensionServiceConfig for kommodity-attestation extension */ -}}
 {{- include "kommodity.talos.attestationExtensionServiceConfig" (dict "logLevel" $.Values.kommodity.logLevel) | nindent 6 }}

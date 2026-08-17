@@ -22,7 +22,8 @@ spec:
         "installer" $.Values.talos.installer
         "logLevel" $.Values.kommodity.logLevel
       ) | trim -}}
-      {{- $needsStrategicPatches := or (not (empty $mergedPatch)) $.Values.kommodity.kms.enabled $.Values.kommodity.security.enabled }}
+      {{- $hetznerPrivate := and (eq $.Values.kommodity.provider.name "Hetzner") (not $.Values.kommodity.network.ipv4.public) }}
+      {{- $needsStrategicPatches := or (not (empty $mergedPatch)) $.Values.kommodity.kms.enabled $.Values.kommodity.security.enabled $hetznerPrivate }}
       {{- if $needsStrategicPatches }}
       strategicPatches:
       {{- if not (empty $mergedPatch) }}
@@ -35,6 +36,10 @@ spec:
       {{- if $.Values.kommodity.security.enabled }}
       {{- /* ExtensionServiceConfig for kommodity-attestation extension */ -}}
 {{- include "kommodity.talos.attestationExtensionServiceConfig" (dict "logLevel" $.Values.kommodity.logLevel) | nindent 6 }}
+      {{- end }}
+      {{- if $hetznerPrivate }}
+      {{- /* Default route: Hetzner DHCP does not announce the network's 0.0.0.0/0 route */ -}}
+{{- include "kommodity.hetzner.defaultRoutePatch" (dict "nodeCIDR" $.Values.kommodity.network.ipv4.nodeCIDR) | nindent 6 }}
       {{- end }}
       {{- end }}
 {{- end }}

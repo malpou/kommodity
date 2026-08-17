@@ -93,27 +93,17 @@ need two things, neither of which the chart can create for you:
      - netfilter-persistent save
    ```
 
-2. A `0.0.0.0/0` network route pointing at that server's **private** IP, plus
-   the default-route machine patch documented in `values.hetzner.yaml`. Hetzner's
-   DHCP does not announce the network route, and the patch's gateway is
-   `10.0.0.1` (Hetzner's own gateway), which then follows the network route to
-   the NAT server.
+2. A `0.0.0.0/0` network route on the Hetzner network, pointing at that server's
+   **private** IP:
 
-   Select the device instead of naming it. Hetzner's private NIC is `enp7s0`,
-   not `eth0`, so a hardcoded `eth0` applies the route to the wrong device and
-   the node ends up with no egress at all, with nothing in the machine config to
-   suggest why. With `public: false` the private NIC is the only physical
-   device:
-
-   ```yaml
-   interfaces:
-     - deviceSelector:
-         physical: true
-       dhcp: true
-       routes:
-         - network: 0.0.0.0/0
-           gateway: 10.0.0.1
+   ```bash
+   hcloud network add-route <network> --destination 0.0.0.0/0 --gateway <nat-private-ip>
    ```
+
+The matching node-side default route is generated for you: Hetzner's DHCP does
+not announce the network route, so the chart injects one automatically whenever
+`public: false`, with the gateway derived from `nodeCIDR`. No machine patch to
+write.
 
 **Ordering matters.** CAPH creates the network itself and cannot adopt an
 existing one, so the network does not exist until the cluster does. But nodes
@@ -128,9 +118,8 @@ delivers an `ExtensionServiceConfig` for `kommodity-autobootstrap`, and a plain
 factory image does not contain that extension. On a private cluster there is no
 public-IP path for the control-plane provider to bootstrap through instead, so
 use a snapshot built by the `talos-cloud-image` workflow (platform `hcloud`,
-extensions baked in) for `public: false`. With that snapshot and the device
-selector above, a private cluster bootstraps with no manual `talosctl bootstrap`
-and no public IP on any node.
+extensions baked in) for `public: false`. With that snapshot, a private cluster
+bootstraps with no manual `talosctl bootstrap` and no public IP on any node.
 
 ## DNS
 

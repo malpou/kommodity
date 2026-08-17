@@ -63,25 +63,14 @@ kommodity:
       # (nodeCIDR required); note that Hetzner private networks have no
       # managed NAT gateway, so image pulls need user-provided egress.
       #
-      # With public: false you ALSO need an explicit default route: Hetzner's
-      # DHCP does not announce a user-created 0.0.0.0/0 network route, so
-      # without this nodes have zero egress and bootstrap never pulls images.
-      # Select the device rather than naming it: on Hetzner the private NIC is
-      # enp7s0 (eth0 is the public one), so a hardcoded eth0 silently applies
-      # the route to the wrong device and leaves the node with no egress. With
-      # public: false the private NIC is the only physical device.
-      #   kommodity:
-      #     global:
-      #       strategicPatches:
-      #         machine:
-      #           network:
-      #             interfaces:
-      #               - deviceSelector:
-      #                   physical: true
-      #                 dhcp: true
-      #                 routes:
-      #                   - network: 0.0.0.0/0
-      #                     gateway: 10.0.0.1   # first usable IP of nodeCIDR
+      # With public: false the chart injects the node-side default route for
+      # you (gateway = first usable IP of nodeCIDR, device selected rather than
+      # named, because Hetzner's private NIC is enp7s0 and not eth0). Hetzner's
+      # DHCP does not announce the user-created 0.0.0.0/0 network route, so
+      # without it nodes have zero egress and never finish bootstrap.
+      #
+      # You still provide the egress itself: a NAT server on the same network
+      # plus a 0.0.0.0/0 network route pointing at it. See articles/hetzner.md.
       public: true
       # Required when public is false. Used as the private network and subnet
       # CIDR; all subnets/servers of a network share one network zone.

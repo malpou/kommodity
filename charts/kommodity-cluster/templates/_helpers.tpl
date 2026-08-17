@@ -365,3 +365,32 @@ id: {{ printf "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Compute/i
 {{- fail "no Talos image configured for Azure: set talos.imageName (recommended) together with kommodity.provider.config.talosImageResourceGroup, or use talos.id / talos.computeGallery / talos.marketplace" -}}
 {{- end -}}
 {{- end -}}
+
+{{/*
+Default-route MachineConfig patch for private Hetzner clusters.
+
+Hetzner's DHCP does not announce the user-created 0.0.0.0/0 network route, so a
+private node comes up with no default route and no egress at all. The gateway is
+the first usable address of the node CIDR (Hetzner's own gateway), which then
+follows the network route to whatever egress the operator attached.
+
+The device is selected rather than named: Hetzner's private NIC is enp7s0, not
+eth0, and with public: false it is the only physical device.
+*/}}
+{{- define "kommodity.hetzner.defaultRoutePatch" -}}
+{{- $cidr := required "kommodity.network.ipv4.nodeCIDR is required when public is false" .nodeCIDR -}}
+{{- $octets := splitList "/" $cidr | first | splitList "." -}}
+{{- $gateway := printf "%s.%s.%s.%d" (index $octets 0) (index $octets 1) (index $octets 2) (add (int (index $octets 3)) 1) -}}
+- |
+  apiVersion: v1alpha1
+  kind: MachineConfig
+  machine:
+    network:
+      interfaces:
+        - deviceSelector:
+            physical: true
+          dhcp: true
+          routes:
+            - network: 0.0.0.0/0
+              gateway: {{ $gateway }}
+{{- end -}}

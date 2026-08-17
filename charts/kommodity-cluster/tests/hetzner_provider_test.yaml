@@ -190,3 +190,35 @@ tests:
           path: data["ccm.yaml"]
           pattern: readOnlyRootFilesystem
         documentIndex: 0
+
+  - it: should inject a default route on private clusters without a user patch
+    template: templates/talos/controlplane.yaml
+    set:
+      kommodity.network.ipv4.public: false
+      kommodity.network.ipv4.nodeCIDR: 10.0.0.0/16
+    asserts:
+      # Gateway is the first usable address of nodeCIDR, not a hardcoded value.
+      - matchRegex:
+          path: spec.controlPlaneConfig.controlplane.strategicPatches[-1]
+          pattern: "gateway: 10\\.0\\.0\\.1"
+      # Selected by device, because Hetzner's private NIC is enp7s0, not eth0.
+      - matchRegex:
+          path: spec.controlPlaneConfig.controlplane.strategicPatches[-1]
+          pattern: "physical: true"
+
+  - it: should derive the default-route gateway from a non-default nodeCIDR
+    template: templates/talos/controlplane.yaml
+    set:
+      kommodity.network.ipv4.public: false
+      kommodity.network.ipv4.nodeCIDR: 10.42.0.0/16
+    asserts:
+      - matchRegex:
+          path: spec.controlPlaneConfig.controlplane.strategicPatches[-1]
+          pattern: "gateway: 10\\.42\\.0\\.1"
+
+  - it: should not inject a default route on public clusters
+    template: templates/talos/controlplane.yaml
+    asserts:
+      - notMatchRegex:
+          path: spec.controlPlaneConfig.controlplane.strategicPatches[-1]
+          pattern: "0\\.0\\.0\\.0/0"
