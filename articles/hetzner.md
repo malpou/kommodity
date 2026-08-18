@@ -162,3 +162,8 @@ the cluster, or sweep afterwards:
 hcloud load-balancer list
 hcloud volume list
 ```
+
+`hcloud-upload-image` builds the snapshot on a temporary server and does not
+clean up if it fails partway, so an interrupted upload leaves a running server
+and an SSH key behind. Check for leftovers named `hcloud-upload-image-*` after
+a failed run.
