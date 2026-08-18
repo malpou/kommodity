@@ -52,6 +52,7 @@ spec:
       {{- $cpLabels := dig "labels" nil $cp }}
       {{- $cpAnnotations := dig "annotations" nil $cp }}
       {{- $oidc := dig "oidc" nil $.Values.kommodity }}
+      {{- $hetznerPrivate := and (eq $.Values.kommodity.provider.name "Hetzner") (not $.Values.kommodity.network.ipv4.public) }}
       {{- /* Build merged MachineConfig strategic patch */ -}}
       {{- $mergedPatch := include "kommodity-cluster.mergedStrategicPatch" (dict
         "globalPatches" $globalPatches
@@ -65,7 +66,6 @@ spec:
         "disableCNI" $.Values.talos.disableCNI
         "disableProxy" $.Values.talos.disableKubeProxy
       ) | trim -}}
-      {{- $hetznerPrivate := and (eq $.Values.kommodity.provider.name "Hetzner") (not $.Values.kommodity.network.ipv4.public) }}
       {{- $hetznerNameservers := ternary (dig "nameservers" (list) $.Values.kommodity.network) (list) (eq $.Values.kommodity.provider.name "Hetzner") }}
       {{- $needsStrategicPatches := or (not (empty $mergedPatch)) $.Values.kommodity.kms.enabled (not $.Values.kommodity.network.ipv4.public) $.Values.talos.autoBootstrap.enabled $.Values.kommodity.security.enabled (not (empty $hetznerNameservers)) }}
       {{- if $needsStrategicPatches }}
@@ -80,7 +80,7 @@ spec:
       {{- end }}
       {{- if or (not $.Values.kommodity.network.ipv4.public) $.Values.talos.autoBootstrap.enabled }}
       {{- /* ExtensionServiceConfig for kommodity-autobootstrap extension */ -}}
-{{- include "kommodity.talos.autoBootstrapExtensionServiceConfig" (dict "autoBootstrap" $.Values.talos.autoBootstrap "logLevel" $.Values.kommodity.logLevel) | nindent 6 }}
+{{- include "kommodity.talos.autoBootstrapExtensionServiceConfig" (dict "autoBootstrap" $.Values.talos.autoBootstrap "logLevel" $.Values.kommodity.logLevel "scanCIDR" (ternary $.Values.kommodity.network.ipv4.nodeCIDR "" $hetznerPrivate)) | nindent 6 }}
       {{- end }}
       {{- if $hetznerPrivate }}
       {{- /* Hetzner's DHCP does not announce the network's 0.0.0.0/0 route */ -}}
