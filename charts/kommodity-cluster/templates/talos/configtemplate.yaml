@@ -12,6 +12,9 @@ spec:
     spec:
       generateType: worker
       talosVersion: {{ default (include "kommodity.talosVersion" $) (dig "talos" "version" "" $np) }}
+      {{- /* Bake the hostname in rather than letting the node keep Talos's generated one. */}}
+      hostname:
+        source: InfrastructureName
       {{- /* Build merged MachineConfig strategic patch for workers */ -}}
       {{- $mergedPatch := include "kommodity-cluster.mergedStrategicPatch" (dict
         "globalPatches" $.Values.kommodity.global.strategicPatches

@@ -44,7 +44,16 @@ spec:
     controlplane:
       generateType: controlplane
       talosVersion: {{ default (include "kommodity.talosVersion" $) (dig "talos" "version" "" $.Values.kommodity.controlplane) }}
-      hostname: {}
+      {{- /*
+        Bake the hostname into the machine config so it is set before etcd
+        starts. Without a source the node keeps the hostname Talos generates
+        for itself until the platform applies the real one, and an etcd member
+        that registers under the generated name cannot rejoin once it changes.
+        InfrastructureName matches the node name the infrastructure provider
+        and the CCM use.
+      */}}
+      hostname:
+        source: InfrastructureName
       {{- $cp := $.Values.kommodity.controlplane }}
       {{- $cpPatches := dig "strategicPatches" nil $cp }}
       {{- $globalPatches := dig "global" "strategicPatches" nil $.Values.kommodity }}
