@@ -1,8 +1,9 @@
 {{/*
 Strategic patch setting the node's default route.
 Used in TalosConfigTemplate and TalosControlPlane.
-The gateway is the first usable address of the given CIDR, and the interface is
-matched by selector so it does not depend on kernel interface naming.
+The gateway is the first usable address of the given CIDR. With public: false the
+private NIC is the only physical device, so it is matched by selector; Hetzner
+names it enp7s0, not eth0.
 */}}
 {{- define "kommodity.talos.defaultRoute" -}}
 {{- $cidr := required "kommodity.network.ipv4.nodeCIDR is required when public is false" .nodeCIDR -}}

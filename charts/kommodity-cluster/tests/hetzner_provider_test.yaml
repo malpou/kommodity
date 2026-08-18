@@ -201,7 +201,7 @@ tests:
       - matchRegex:
           path: spec.controlPlaneConfig.controlplane.strategicPatches[2]
           pattern: "gateway: 10\\.0\\.0\\.1"
-      # Hetzner's private NIC is enp7s0, so the interface is matched by selector.
+      # Hetzner's private NIC is enp7s0; with public: false it is the only physical device.
       - matchRegex:
           path: spec.controlPlaneConfig.controlplane.strategicPatches[2]
           pattern: "physical: true"
