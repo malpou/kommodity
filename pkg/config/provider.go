@@ -11,6 +11,7 @@ const (
 	ProviderTalos Provider = "talos"
 	ProviderScaleway Provider = "scaleway"
 	ProviderAzure Provider = "azure"
+	ProviderByot Provider = "byot"
 	ProviderKubevirt Provider = "kubevirt"
 	ProviderHetzner Provider = "hetzner"
 )
@@ -23,6 +24,7 @@ func GetAllProviders() []Provider {
 		ProviderTalos,
 		ProviderScaleway,
 		ProviderAzure,
+		ProviderByot,
 		ProviderKubevirt,
 		ProviderHetzner,
 	}

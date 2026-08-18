@@ -98,11 +98,17 @@ the standard `system:masters`. For local development, set
 
 ### Audit Logging
 
-Native support for the Kubernetes
-[audit policy format](https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/).
-Point `KOMMODITY_AUDIT_POLICY_FILE_PATH` at a policy file and every API request
-is captured with user, source IP, timestamp, and (optionally) request/response
-bodies.
+Audit logging is **disabled by default** and can be enabled with
+`KOMMODITY_AUDIT_ENABLED=true`. When enabled, an embedded
+[Kubernetes audit policy](https://kubernetes.io/docs/tasks/debug/debug-cluster/audit/) is used.
+Every API request is captured with user, source IP, timestamp, and (optionally)
+request/response bodies. Audit events are written to stdout as structured JSON,
+which is picked up by your container platform's log aggregator.
+
+The default policy logs `RequestResponse` for writes to core, RBAC, and Cluster
+API resources, `Metadata` for everything else, and suppresses health probes and
+kubelet lease heartbeats. Override by pointing `KOMMODITY_AUDIT_POLICY_FILE_PATH`
+at a custom policy file.
 
 ### Hardware-Rooted Machine Trust
 
@@ -401,30 +407,33 @@ connection. Drop it on any host, point it at a database, and run.
 
 Kommodity is configured via environment variables.
 
-| Variable                                           | Description                                                       | Default                 |
-| -------------------------------------------------- | ----------------------------------------------------------------- | ----------------------- |
-| `KOMMODITY_PORT`                                   | Port for the Kommodity server                                     | `5000`                  |
-| `KOMMODITY_BASE_URL`                               | Base URL for the Kommodity server                                 | `http://localhost:5000` |
-| `KOMMODITY_DB_URI`                                 | PostgreSQL connection URI                                         | (none)                  |
-| `KOMMODITY_DEVELOPMENT_MODE`                       | Enable development mode                                           | `false`                 |
-| `KOMMODITY_INSECURE_DISABLE_AUTHENTICATION`        | Disable authentication for local development                      | `false`                 |
-| `KOMMODITY_ADMIN_GROUP`                            | Group name granted cluster-admin equivalence                      | (none)                  |
-| `KOMMODITY_OIDC_ISSUER_URL`                        | OIDC issuer URL                                                   | (none)                  |
-| `KOMMODITY_OIDC_CLIENT_ID`                         | OIDC client ID                                                    | (none)                  |
-| `KOMMODITY_OIDC_USERNAME_CLAIM`                    | OIDC claim used for the username                                  | `email`                 |
-| `KOMMODITY_OIDC_GROUPS_CLAIM`                      | OIDC claim used for groups                                        | `groups`                |
-| `KOMMODITY_INFRASTRUCTURE_PROVIDERS`               | Comma-separated providers to enable                               | all                     |
-| `KOMMODITY_ATTESTATION_NONCE_TTL`                  | TTL for attestation nonces (e.g. `5m`, `1h`)                      | `5m`                    |
-| `KOMMODITY_AUDIT_POLICY_FILE_PATH`                 | Path to a Kubernetes audit policy file                            | (none)                  |
-| `KOMMODITY_TALOS_PROXY_ENABLED`                    | Enable the HTTP CONNECT Talos gRPC proxy                          | `true`                  |
-| `KOMMODITY_TALOS_PROXY_PORT`                       | Local listen port for the proxy                                   | `15050`                 |
-| `KOMMODITY_TALOS_PROXY_NAMESPACE`                  | Namespace of the talos-cluster-proxy service in workload clusters | `talos-cluster-proxy`   |
-| `KOMMODITY_TALOS_PROXY_SERVICE_NAME`               | Name of the talos-cluster-proxy service                           | `talos-cluster-proxy`   |
-| `KOMMODITY_TALOS_PROXY_IDLE_TIMEOUT`               | Idle timeout before unused tunnels are closed                     | `1m`                    |
-| `KOMMODITY_GARBAGE_COLLECTOR_ENABLED`              | Enable the embedded garbage collector                             | `true`                  |
-| `KOMMODITY_GARBAGE_COLLECTOR_WORKERS`              | Number of garbage collector workers                               | `5`                     |
-| `KOMMODITY_GARBAGE_COLLECTOR_SYNC_PERIOD`          | Resync period for the garbage collector                           | `30s`                   |
-| `KOMMODITY_GARBAGE_COLLECTOR_INITIAL_SYNC_TIMEOUT` | Timeout waiting for initial informer sync                         | `60s`                   |
+The default audit policy is [`pkg/server/audit-policy.yaml`](pkg/server/audit-policy.yaml).
+
+| Variable                                           | Description                                                       | Default                                                      |
+| -------------------------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------ |
+| `KOMMODITY_PORT`                                   | Port for the Kommodity server                                     | `5000`                                                       |
+| `KOMMODITY_BASE_URL`                               | Base URL for the Kommodity server                                 | `http://localhost:5000`                                      |
+| `KOMMODITY_DB_URI`                                 | PostgreSQL connection URI                                         | (none)                                                       |
+| `KOMMODITY_DEVELOPMENT_MODE`                       | Enable development mode                                           | `false`                                                      |
+| `KOMMODITY_INSECURE_DISABLE_AUTHENTICATION`        | Disable authentication for local development                      | `false`                                                      |
+| `KOMMODITY_ADMIN_GROUP`                            | Group name granted cluster-admin equivalence                      | (none)                                                       |
+| `KOMMODITY_OIDC_ISSUER_URL`                        | OIDC issuer URL                                                   | (none)                                                       |
+| `KOMMODITY_OIDC_CLIENT_ID`                         | OIDC client ID                                                    | (none)                                                       |
+| `KOMMODITY_OIDC_USERNAME_CLAIM`                    | OIDC claim used for the username                                  | `email`                                                      |
+| `KOMMODITY_OIDC_GROUPS_CLAIM`                      | OIDC claim used for groups                                        | `groups`                                                     |
+| `KOMMODITY_INFRASTRUCTURE_PROVIDERS`               | Comma-separated providers to enable                               | all                                                          |
+| `KOMMODITY_ATTESTATION_NONCE_TTL`                  | TTL for attestation nonces (e.g. `5m`, `1h`)                      | `5m`                                                         |
+| `KOMMODITY_AUDIT_POLICY_FILE_PATH`                 | Path to a custom Kubernetes audit policy file                     | embedded [`audit-policy.yaml`](pkg/server/audit-policy.yaml) |
+| `KOMMODITY_AUDIT_ENABLED`                          | Enable audit logging                                              | `false`                                                      |
+| `KOMMODITY_TALOS_PROXY_ENABLED`                    | Enable the HTTP CONNECT Talos gRPC proxy                          | `true`                                                       |
+| `KOMMODITY_TALOS_PROXY_PORT`                       | Local listen port for the proxy                                   | `15050`                                                      |
+| `KOMMODITY_TALOS_PROXY_NAMESPACE`                  | Namespace of the talos-cluster-proxy service in workload clusters | `talos-cluster-proxy`                                        |
+| `KOMMODITY_TALOS_PROXY_SERVICE_NAME`               | Name of the talos-cluster-proxy service                           | `talos-cluster-proxy`                                        |
+| `KOMMODITY_TALOS_PROXY_IDLE_TIMEOUT`               | Idle timeout before unused tunnels are closed                     | `1m`                                                         |
+| `KOMMODITY_GARBAGE_COLLECTOR_ENABLED`              | Enable the embedded garbage collector                             | `true`                                                       |
+| `KOMMODITY_GARBAGE_COLLECTOR_WORKERS`              | Number of garbage collector workers                               | `5`                                                          |
+| `KOMMODITY_GARBAGE_COLLECTOR_SYNC_PERIOD`          | Resync period for the garbage collector                           | `30s`                                                        |
+| `KOMMODITY_GARBAGE_COLLECTOR_INITIAL_SYNC_TIMEOUT` | Timeout waiting for initial informer sync                         | `60s`                                                        |
 
 Provider settings are managed in
 [`pkg/provider/providers.yaml`](pkg/provider/providers.yaml): name, repository,
@@ -440,10 +449,11 @@ compatible with Cluster API `v1.10.x`.
 | cluster-api                              | v1.10.10 | Core           |
 | cluster-api-control-plane-provider-talos | v0.5.13  | Control Plane  |
 | cluster-api-bootstrap-provider-talos     | v0.6.12  | Bootstrap      |
-| cluster-api-provider-scaleway            | v0.1.5   | Infrastructure |
-| cluster-api-provider-kubevirt            | v0.1.10  | Infrastructure |
 | cluster-api-provider-azure               | v1.21.0  | Infrastructure |
+| cluster-api-provider-bringyourowntalos   | v0.2.0   | Infrastructure |
 | cluster-api-provider-hetzner             | v1.1.0-alpha.4 | Infrastructure |
+| cluster-api-provider-kubevirt            | v0.1.10  | Infrastructure |
+| cluster-api-provider-scaleway            | v0.1.5   | Infrastructure |
 
 ### Limitations
 

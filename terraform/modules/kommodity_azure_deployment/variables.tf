@@ -57,7 +57,7 @@ variable "log_analytics" {
     workspace_sku       = optional(string, "PerGB2018")
     workspace_retention = optional(number, 30)
   })
-  description = "Log Analytics workspace configuration"
+  description = "Log Analytics workspace configuration for Azure Monitor diagnostic settings"
   default     = {}
 }
 
@@ -81,6 +81,7 @@ variable "kommodity_container" {
     infrastructure_providers        = optional(string, "") # If env var is empty, Kommodity uses default providers
     garbage_collector_enabled       = optional(string, "true")
     azure_default_credential_secret = optional(string, "")
+    audit_enabled                   = optional(string, "false")
   })
   description = "Kommodity container configuration"
   default     = {}

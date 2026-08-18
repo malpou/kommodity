@@ -1,3 +1,7 @@
+{{- /* TalosControlPlane requires a clonable infra template reference; byot
+       machines are static (one publicIP each), so byot skips this object.
+       See templates/provider/byot/machines.yaml. */ -}}
+{{- if ne $.Values.kommodity.provider.name "Byot" }}
 ---
 apiVersion: controlplane.cluster.x-k8s.io/v1alpha3
 kind: TalosControlPlane
@@ -74,10 +78,11 @@ spec:
         "logLevel" $.Values.kommodity.logLevel
         "disableCNI" $.Values.talos.disableCNI
         "disableProxy" $.Values.talos.disableKubeProxy
-      ) | trim -}}
+      ) | trim }}
       {{- $hetznerNameservers := ternary (dig "nameservers" (list) $.Values.kommodity.network) (list) (eq $.Values.kommodity.provider.name "Hetzner") }}
-      {{- $needsStrategicPatches := or (not (empty $mergedPatch)) $.Values.kommodity.kms.enabled (not $.Values.kommodity.network.ipv4.public) $.Values.talos.autoBootstrap.enabled $.Values.kommodity.security.enabled (not (empty $hetznerNameservers)) }}
-      {{- if $needsStrategicPatches }}
+      {{- $kmsEndpoint := "" -}}
+      {{- if $.Values.kommodity.kms.enabled }}{{- $kmsEndpoint = $.Values.kommodity.kms.endpoint -}}{{- end -}}
+      {{- $additionalVolumesPatch := include "kommodity.talos.additionalVolumes" (dict "additionalVolumes" $.Values.kommodity.controlplane.additionalVolumes "kmsEndpoint" $kmsEndpoint) | trim }}
       strategicPatches:
       {{- /* Merged MachineConfig patch (labels, taints, annotations, env, installer, OIDC, CNI, proxy, CCM, user patches) */ -}}
       {{- if not (empty $mergedPatch) }}
@@ -87,9 +92,9 @@ spec:
       {{- /* VolumeConfig for disk encryption (Talos v1.12+) */ -}}
 {{- include "kommodity.talos.volumeEncryption" (dict "endpoint" $.Values.kommodity.kms.endpoint) | nindent 6 }}
       {{- end }}
-      {{- if or (not $.Values.kommodity.network.ipv4.public) $.Values.talos.autoBootstrap.enabled }}
-      {{- /* ExtensionServiceConfig for kommodity-autobootstrap extension */ -}}
-{{- include "kommodity.talos.autoBootstrapExtensionServiceConfig" (dict "autoBootstrap" $.Values.talos.autoBootstrap "logLevel" $.Values.kommodity.logLevel "scanCIDR" (ternary $.Values.kommodity.network.ipv4.nodeCIDR "" $hetznerPrivate)) | nindent 6 }}
+      {{- if $.Values.kommodity.controlplane.instanceVolumes }}
+      {{- /* UserVolumeConfig for instance-local disks (not cloud-provisioned) */ -}}
+{{- include "kommodity.talos.instanceVolumes" (dict "instanceVolumes" $.Values.kommodity.controlplane.instanceVolumes "kmsEndpoint" $kmsEndpoint "kmsEnabled" $.Values.kommodity.kms.enabled) | nindent 6 }}
       {{- end }}
       {{- if $hetznerPrivate }}
       {{- /* Hetzner's DHCP does not announce the network's 0.0.0.0/0 route */ -}}
@@ -99,8 +104,14 @@ spec:
       {{- /* Nameservers for the node, propagated by Talos to CoreDNS */ -}}
 {{- include "kommodity.talos.resolverConfig" (dict "nameservers" $hetznerNameservers) | nindent 6 }}
       {{- end }}
+      {{- if not (empty $additionalVolumesPatch) }}
+      {{- /* UserVolumeConfig for cloud-provisioned data disks (Azure dataDisks, etc.) */ -}}
+{{ $additionalVolumesPatch | nindent 6 }}
+      {{- end }}
+      {{- /* ExtensionServiceConfig for kommodity-autobootstrap extension */ -}}
+{{- include "kommodity.talos.autoBootstrapExtensionServiceConfig" (dict "autoBootstrap" $.Values.talos.autoBootstrap "logLevel" $.Values.kommodity.logLevel "replicas" (default 1 $.Values.kommodity.controlplane.replicas) "scanCIDR" (ternary $.Values.kommodity.network.ipv4.nodeCIDR "" $hetznerPrivate)) | nindent 6 }}
       {{- if $.Values.kommodity.security.enabled }}
       {{- /* ExtensionServiceConfig for kommodity-attestation extension */ -}}
 {{- include "kommodity.talos.attestationExtensionServiceConfig" (dict "logLevel" $.Values.kommodity.logLevel) | nindent 6 }}
       {{- end }}
-      {{- end }}
+{{- end }}

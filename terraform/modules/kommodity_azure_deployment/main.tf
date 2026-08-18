@@ -135,7 +135,7 @@ resource "azurerm_postgresql_flexible_server_database" "this" {
   }
 }
 
-# Log Analytics Workspace for Container Apps
+# Log Analytics Workspace for Azure Monitor diagnostic settings
 resource "azurerm_log_analytics_workspace" "kommodity-log-analytics" {
   name                = "${var.resource_group.name}-log-analytics"
   location            = azurerm_resource_group.kommodity-resource-group.location
@@ -168,21 +168,44 @@ resource "azurerm_subnet" "kommodity-container-sn" {
 }
 
 resource "azurerm_container_app_environment" "kommodity-environment" {
-  name                       = "${var.resource_group.name}-environment"
-  location                   = azurerm_resource_group.kommodity-resource-group.location
-  resource_group_name        = azurerm_resource_group.kommodity-resource-group.name
-  log_analytics_workspace_id = azurerm_log_analytics_workspace.kommodity-log-analytics.id
-  infrastructure_subnet_id   = azurerm_subnet.kommodity-container-sn.id
+  name                     = "${var.resource_group.name}-environment"
+  location                 = azurerm_resource_group.kommodity-resource-group.location
+  resource_group_name      = azurerm_resource_group.kommodity-resource-group.name
+  logs_destination         = "azure-monitor"
+  infrastructure_subnet_id = azurerm_subnet.kommodity-container-sn.id
 
   depends_on = [
     azurerm_resource_group.kommodity-resource-group,
-    azurerm_log_analytics_workspace.kommodity-log-analytics,
     azurerm_subnet.kommodity-container-sn,
   ]
 
   lifecycle {
     ignore_changes = [infrastructure_resource_group_name, workload_profile]
   }
+}
+
+resource "azurerm_monitor_diagnostic_setting" "kommodity-environment" {
+  name                           = "${var.resource_group.name}-environment-logs"
+  target_resource_id             = azurerm_container_app_environment.kommodity-environment.id
+  log_analytics_workspace_id     = azurerm_log_analytics_workspace.kommodity-log-analytics.id
+  log_analytics_destination_type = "Dedicated"
+
+  enabled_log {
+    category = "ContainerAppConsoleLogs"
+  }
+
+  enabled_log {
+    category = "ContainerAppSystemLogs"
+  }
+
+  enabled_metric {
+    category = "AllMetrics"
+  }
+
+  depends_on = [
+    azurerm_container_app_environment.kommodity-environment,
+    azurerm_log_analytics_workspace.kommodity-log-analytics,
+  ]
 }
 
 # Container App for kommodity service
@@ -273,6 +296,10 @@ resource "azurerm_container_app" "kommodity-app" {
         name  = "KOMMODITY_GARBAGE_COLLECTOR_ENABLED"
         value = var.kommodity_container.garbage_collector_enabled
       }
+      env {
+        name  = "KOMMODITY_AUDIT_ENABLED"
+        value = var.kommodity_container.audit_enabled
+      }
       dynamic "env" {
         for_each = var.kommodity_container.azure_default_credential_secret != "" ? [var.kommodity_container.azure_default_credential_secret] : []
         content {
@@ -298,6 +325,22 @@ resource "azurerm_container_app" "kommodity-app" {
   lifecycle {
     ignore_changes = [workload_profile_name]
   }
+}
+
+resource "azurerm_monitor_diagnostic_setting" "kommodity-app" {
+  name                           = "${var.resource_group.name}-app-metrics"
+  target_resource_id             = azurerm_container_app.kommodity-app.id
+  log_analytics_workspace_id     = azurerm_log_analytics_workspace.kommodity-log-analytics.id
+  log_analytics_destination_type = "Dedicated"
+
+  enabled_metric {
+    category = "AllMetrics"
+  }
+
+  depends_on = [
+    azurerm_container_app.kommodity-app,
+    azurerm_log_analytics_workspace.kommodity-log-analytics,
+  ]
 }
 
 # Custom domain DNS + managed certificate for the Container App

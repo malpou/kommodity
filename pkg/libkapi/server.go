@@ -67,8 +67,10 @@ type Server struct {
 	internalHooksCancel context.CancelFunc
 
 	// loopbackConfig is the server's own privileged (system:masters-equivalent)
-	// identity, handed to each PostStartHookFunc/PreShutdownHookFunc - the
-	// same config Controller/Manager use internally (see buildManager).
+	// identity - the same config Controller/Manager use internally (see
+	// buildManager). A copy (see runPostStartHooks/runPreShutdownHooks) is
+	// handed to each PostStartHookFunc/PreShutdownHookFunc, never this field
+	// itself, so a hook can't mutate it out from under other consumers.
 	loopbackConfig *restclient.Config
 
 	// postStartHooks and preShutdownHooks are the WithPostStartHook/
@@ -215,6 +217,11 @@ func buildServer(cfg config, addr string, handle *storage.Handle,
 		return nil, fmt.Errorf("failed to set up API server config: %w", err)
 	}
 
+	err = finishRBACAuthorizer(authCfg, genericServerConfig)
+	if err != nil {
+		return nil, err
+	}
+
 	err = resolveAndSetAuth(authCfg, genericServerConfig, controllersLogger)
 	if err != nil {
 		return nil, err
@@ -245,6 +252,58 @@ func buildServer(cfg config, addr string, handle *storage.Handle,
 		postStartHooks:  cfg.postStartHooks,
 		preShutdownHooks: cfg.preShutdownHooks,
 	}, nil
+}
+
+// finishRBACAuthorizer completes WithRBACAuthorizer's setup, if it was used
+// (authCfg.RBACListerSource is nil otherwise, and this is a no-op): it
+// installs rbac/v1 informer listers, built from
+// genericServerConfig.SharedInformerFactory, onto the RBACListerSource the
+// authorizer already holds a reference to (via upstream's RBAC authorizer,
+// itself already wired into authz/genericServerConfig.Authorization.Authorizer/
+// StandardAPIGroups at this point) — see auth.WithRBACAuthorizer's doc for
+// why listers, not a direct client, and why this can't happen any earlier.
+//
+// Accessing SharedInformerFactory.Rbac().V1() registers these four
+// informers on the factory but doesn't start them - nothing populates the
+// listers yet. The post-start hook registered below starts the factory
+// once the server is listening, the same pattern
+// pkg/libkapi/controllers.NewTokenControllerHook uses for its own SA/Secret
+// informers (see token.go's doc: "informers must be registered on the
+// SharedInformerFactory before Start is called"). Calling Start on a
+// factory that's already running (e.g. because WithServiceAccount's own
+// hook already started it) is safe - client-go tracks per-informer state
+// and only starts ones that aren't already running.
+//
+// Called synchronously from buildServer, itself called synchronously from
+// New — entirely before ListenAndServe, so before the listener is ever
+// bound and before any real request could possibly reach the authorizer.
+func finishRBACAuthorizer(authCfg *auth.ResolvedConfig, genericServerConfig *genericapiserver.RecommendedConfig) error {
+	if authCfg.RBACListerSource == nil {
+		return nil
+	}
+
+	rbacInformers := genericServerConfig.SharedInformerFactory.Rbac().V1()
+
+	authCfg.RBACListerSource.SetListers(
+		rbacInformers.Roles().Lister(),
+		rbacInformers.RoleBindings().Lister(),
+		rbacInformers.ClusterRoles().Lister(),
+		rbacInformers.ClusterRoleBindings().Lister(),
+	)
+
+	sharedInformerFactory := genericServerConfig.SharedInformerFactory
+
+	err := genericServerConfig.AddPostStartHook("libkapi-rbac-authorizer-informers",
+		func(ctx genericapiserver.PostStartHookContext) error {
+			sharedInformerFactory.Start(ctx.Done())
+
+			return nil
+		})
+	if err != nil {
+		return fmt.Errorf("failed to add rbac authorizer informers post-start hook: %w", err)
+	}
+
+	return nil
 }
 
 // newHTTPServer builds the *http.Server for the listener. When grpcServer is
@@ -485,9 +544,9 @@ func registerKeyHooks(
 
 // buildDelegationChain builds the CRD server -> standard-API delegate ->
 // aggregator delegation chain and returns the aggregator plus the
-// caller-facing gRPC server (nil unless WithGRPCServerFactory was used) and
-// handler (custom HTTP handlers and, if any, gRPC routing layered over the
-// aggregator's own Handler).
+// caller-facing gRPC server (nil unless some ServerFactory called
+// Ctx.GRPCServer) and handler (custom HTTP handlers and, if any, gRPC
+// routing layered over the aggregator's own Handler).
 func buildDelegationChain(
 	cfg config,
 	genericServerConfig *genericapiserver.RecommendedConfig,
@@ -523,14 +582,14 @@ func buildDelegationChain(
 	// and OpenAPI routes on the PathRecorderMux, and calling it twice (once
 	// here, once in ListenAndServe) produces "duplicate path registration"
 	// errors. The Handler is already populated by NewWithDelegate, so
-	// buildMux can mount it before PrepareRun runs. ListenAndServe calls
-	// PrepareRun exactly once before NonBlockingRunWithContext.
-	mux, err := buildMux(cfg.handlers, aggregatorServer.GenericAPIServer.Handler)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	grpcServer, handler, err := buildHandler(cfg.grpcFactories, mux)
+	// runServerFactories can mount it before PrepareRun runs. ListenAndServe
+	// calls PrepareRun exactly once before NonBlockingRunWithContext.
+	grpcServer, handler, err := runServerFactories(
+		cfg.serverFactories,
+		genericServerConfig.LoopbackClientConfig,
+		storageEndpoints,
+		aggregatorServer.GenericAPIServer.Handler,
+	)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -735,10 +794,10 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	return nil
 }
 
-// shutdownGRPCServer gracefully stops s.grpcServer (if WithGRPCServerFactory
-// was used), waiting for in-flight RPCs to finish. Bounded by ctx, the same
-// way Shutdown bounds its wait for the controller manager: if ctx is done
-// before GracefulStop returns, it falls back to Stop, which closes
+// shutdownGRPCServer gracefully stops s.grpcServer (if some ServerFactory
+// called Ctx.GRPCServer), waiting for in-flight RPCs to finish. Bounded by
+// ctx, the same way Shutdown bounds its wait for the controller manager: if
+// ctx is done before GracefulStop returns, it falls back to Stop, which closes
 // connections immediately rather than letting Shutdown hang forever on a
 // client holding a stream open. A no-op when grpcServer is nil.
 func (s *Server) shutdownGRPCServer(ctx context.Context) {
@@ -923,7 +982,7 @@ func (s *Server) startManager() {
 // ListenAndServe can fail startup without crashing the process.
 func (s *Server) runPostStartHooks(ctx context.Context) error {
 	for i, hook := range s.postStartHooks {
-		err := hook(ctx, s.loopbackConfig)
+		err := hook(ctx, restclient.CopyConfig(s.loopbackConfig))
 		if err != nil {
 			return fmt.Errorf("post-start hook %d failed: %w", i, err)
 		}
@@ -951,7 +1010,7 @@ func (s *Server) runPreShutdownHooks(ctx context.Context) {
 		defer close(done)
 
 		for i, hook := range s.preShutdownHooks {
-			err := hook(ctx, s.loopbackConfig)
+			err := hook(ctx, restclient.CopyConfig(s.loopbackConfig))
 			if err != nil {
 				s.logger.Error("Pre-shutdown hook failed", "index", i, "error", err)
 			}

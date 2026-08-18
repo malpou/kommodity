@@ -188,6 +188,9 @@ Any values that should trigger a new Talos config template when changed should b
 {{- with (dig "additionalVolumes" "" .poolValues) -}}
 	{{- $_ := set $data "additionalVolumes" . -}}
 {{- end -}}
+{{- with (dig "instanceVolumes" "" .poolValues) -}}
+	{{- $_ := set $data "instanceVolumes" . -}}
+{{- end -}}
 {{- toJson $data | sha256sum | trunc 6 -}}
 {{- end -}}
 
@@ -205,6 +208,9 @@ Any values that should trigger a new Machine template when changed should be add
 {{- end -}}
 {{- $_ := set $data "diskSize" (dig "os" "disk" "size" "" .poolValues) -}}
 {{- $_ := set $data "gpus" (dig "gpus" "" .poolValues) -}}
+{{- if and (eq .allValues.kommodity.provider.name "Azure") (hasKey .poolValues "acceleratedNetworking") -}}
+{{- $_ := set $data "acceleratedNetworking" .poolValues.acceleratedNetworking -}}
+{{- end -}}
 {{- with (dig "additionalVolumes" "" .poolValues) -}}
 	{{- $_ := set $data "additionalVolumes" . -}}
 {{- end -}}
@@ -363,5 +369,26 @@ id: {{ $talos.id }}
 id: {{ printf "/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Compute/images/%s" $subID $imageRG $talos.imageName }}
 {{- else -}}
 {{- fail "no Talos image configured for Azure: set talos.imageName (recommended) together with kommodity.provider.config.talosImageResourceGroup, or use talos.id / talos.computeGallery / talos.marketplace" -}}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Resolve byot join/split policies for a static machine.
+Precedence: static machine > parent block (controlplane or nodepool) > default "None".
+Renders joinPolicy/splitPolicy lines only when at least one policy is non-default.
+Input: dict "scope" (value path for error messages) "parent" (controlplane/nodepool values) "machine" (static machine values).
+*/}}
+{{- define "kommodity-cluster.byotPolicies" -}}
+{{- $joinPolicy := default (default "None" .parent.joinPolicy) .machine.joinPolicy -}}
+{{- $splitPolicy := default (default "None" .parent.splitPolicy) .machine.splitPolicy -}}
+{{- if not (or (eq $joinPolicy "None") (eq $joinPolicy "Reset")) -}}
+{{- fail (printf "%s.joinPolicy must be None or Reset, got %q" .scope $joinPolicy) -}}
+{{- end -}}
+{{- if not (or (eq $splitPolicy "None") (eq $splitPolicy "Reset")) -}}
+{{- fail (printf "%s.splitPolicy must be None or Reset, got %q" .scope $splitPolicy) -}}
+{{- end -}}
+{{- if or (ne $joinPolicy "None") (ne $splitPolicy "None") }}
+joinPolicy: {{ $joinPolicy | quote }}
+splitPolicy: {{ $splitPolicy | quote }}
 {{- end -}}
 {{- end -}}
